@@ -1,0 +1,201 @@
+import streamlit as st
+import sqlite3
+import pandas as pd
+import FinanceDataReader as fdr
+
+# ==========================================
+# 페이지 설정
+# ==========================================
+st.set_page_config(
+    page_title="KR RS Rating Screener",
+    page_icon="📊",
+    layout="wide",
+)
+
+st.title("📊 KR RS Rating Screener")
+
+# ==========================================
+# 데이터 로드
+# ==========================================
+DB_PATH = "quant_dashboard.db"
+
+
+@st.cache_data(ttl=600)
+def load_rs_data():
+    """SQLite에서 RS 데이터 로드."""
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM rs_ratings ORDER BY rs_rating DESC", conn)
+    conn.close()
+    return df
+
+
+@st.cache_data(ttl=3600)
+def load_universe():
+    """KRX 종목명 & 시장 정보 로드."""
+    df_krx = fdr.StockListing("KRX")
+    df_krx = df_krx[["Code", "Name", "Market"]].copy()
+    df_krx.columns = ["ticker", "name", "market"]
+    return df_krx
+
+
+# 데이터 로드
+df_rs = load_rs_data()
+df_universe = load_universe()
+
+# 종목명 & 시장 정보 병합
+df = df_rs.merge(df_universe, on="ticker", how="left")
+
+# ==========================================
+# 사이드바 필터
+# ==========================================
+st.sidebar.header("🔍 필터 설정")
+
+# 날짜 선택
+available_dates = sorted(df["date"].unique(), reverse=True)
+selected_date = st.sidebar.selectbox("📅 기준일", available_dates)
+
+# 시장 필터
+market_options = ["전체", "KOSPI", "KOSDAQ"]
+selected_market = st.sidebar.selectbox("🏛️ 시장", market_options)
+
+# RS Rating 범위
+st.sidebar.markdown("---")
+st.sidebar.subheader("RS Rating 범위")
+rs_min, rs_max = st.sidebar.slider(
+    "IBD RS Rating",
+    min_value=1, max_value=99, value=(1, 99),
+)
+
+# 개별 RS 필터 (접이식)
+with st.sidebar.expander("📐 개별 기간 RS 필터"):
+    rs_1m_min = st.slider("RS 1M 최소", 1, 99, 1)
+    rs_3m_min = st.slider("RS 3M 최소", 1, 99, 1)
+    rs_6m_min = st.slider("RS 6M 최소", 1, 99, 1)
+    rs_12m_min = st.slider("RS 12M 최소", 1, 99, 1)
+
+# 종가 범위
+st.sidebar.markdown("---")
+price_min = st.sidebar.number_input("💰 최소 종가", value=0, step=1000)
+price_max = st.sidebar.number_input("💰 최대 종가 (0=무제한)", value=0, step=10000)
+
+# 종목 검색
+st.sidebar.markdown("---")
+search_query = st.sidebar.text_input("🔎 종목명/코드 검색")
+
+# ==========================================
+# 필터 적용
+# ==========================================
+filtered = df[df["date"] == selected_date].copy()
+
+if selected_market != "전체":
+    filtered = filtered[filtered["market"] == selected_market]
+
+filtered = filtered[
+    (filtered["rs_rating"] >= rs_min) & (filtered["rs_rating"] <= rs_max)
+]
+
+# 개별 RS 필터
+filtered = filtered[
+    (filtered["rs_1m"].fillna(0) >= rs_1m_min)
+    & (filtered["rs_3m"].fillna(0) >= rs_3m_min)
+    & (filtered["rs_6m"].fillna(0) >= rs_6m_min)
+    & (filtered["rs_12m"].fillna(0) >= rs_12m_min)
+]
+
+# 종가 필터
+filtered = filtered[filtered["latest_close"] >= price_min]
+if price_max > 0:
+    filtered = filtered[filtered["latest_close"] <= price_max]
+
+# 종목 검색
+if search_query:
+    mask = (
+        filtered["ticker"].str.contains(search_query, case=False, na=False)
+        | filtered["name"].str.contains(search_query, case=False, na=False)
+    )
+    filtered = filtered[mask]
+
+# ==========================================
+# 표시용 컬럼 정리
+# ==========================================
+display_cols = [
+    "ticker", "name", "market", "latest_close",
+    "rs_rating", "composite_score",
+    "rs_1d", "rs_1w", "rs_1m", "rs_3m", "rs_6m", "rs_12m",
+    "ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_12m",
+]
+display_cols = [c for c in display_cols if c in filtered.columns]
+df_display = filtered[display_cols].reset_index(drop=True)
+
+# ==========================================
+# 메인 화면
+# ==========================================
+
+# 요약 지표
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("📅 기준일", selected_date)
+col2.metric("📋 필터 결과", f"{len(df_display)}개")
+col3.metric("🏛️ 시장", selected_market)
+
+total_for_date = len(df[df["date"] == selected_date])
+col4.metric("전체 종목", f"{total_for_date}개")
+
+st.markdown("---")
+
+# 데이터 테이블
+st.subheader(f"📋 스크리너 결과 ({len(df_display)}개)")
+st.dataframe(
+    df_display,
+    use_container_width=True,
+    height=500,
+    column_config={
+        "ticker": st.column_config.TextColumn("종목코드", width="small"),
+        "name": st.column_config.TextColumn("종목명", width="medium"),
+        "market": st.column_config.TextColumn("시장", width="small"),
+        "latest_close": st.column_config.NumberColumn("종가", format="%d"),
+        "rs_rating": st.column_config.NumberColumn("⭐ RS Rating", width="small"),
+        "composite_score": st.column_config.NumberColumn("복합점수"),
+        "rs_1d": st.column_config.NumberColumn("RS 1D", width="small"),
+        "rs_1w": st.column_config.NumberColumn("RS 1W", width="small"),
+        "rs_1m": st.column_config.NumberColumn("RS 1M", width="small"),
+        "rs_3m": st.column_config.NumberColumn("RS 3M", width="small"),
+        "rs_6m": st.column_config.NumberColumn("RS 6M", width="small"),
+        "rs_12m": st.column_config.NumberColumn("RS 12M", width="small"),
+    },
+)
+
+# ==========================================
+# 차트
+# ==========================================
+st.markdown("---")
+chart_col1, chart_col2 = st.columns(2)
+
+with chart_col1:
+    st.subheader("📊 RS Rating 분포")
+    if not df_display.empty:
+        hist_data = df_display["rs_rating"].dropna()
+        st.bar_chart(hist_data.value_counts().sort_index())
+
+with chart_col2:
+    st.subheader("📈 RS Rating 구간별 종목 수")
+    if not df_display.empty:
+        bins = [0, 20, 40, 60, 80, 99]
+        labels = ["1-20", "21-40", "41-60", "61-80", "81-99"]
+        df_display["rs_group"] = pd.cut(
+            df_display["rs_rating"], bins=bins, labels=labels
+        )
+        group_counts = df_display["rs_group"].value_counts().sort_index()
+        st.bar_chart(group_counts)
+
+# ==========================================
+# CSV 다운로드
+# ==========================================
+st.markdown("---")
+if not df_display.empty:
+    csv = df_display.to_csv(index=False, encoding="utf-8-sig")
+    st.download_button(
+        label="📥 CSV 다운로드",
+        data=csv,
+        file_name=f"rs_screener_{selected_date}.csv",
+        mime="text/csv",
+    )

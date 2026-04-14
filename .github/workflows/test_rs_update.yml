@@ -1,0 +1,30 @@
+name: "[TEST] RS Rating Pipeline Check"
+
+on:
+  # 수동 실행 전용
+  workflow_dispatch:
+
+jobs:
+  test-rs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "KIS_APP_KEY=${{ secrets.KIS_APP_KEY }}" >> .env
+          echo "KIS_APP_SECRET=${{ secrets.KIS_APP_SECRET }}" >> .env
+
+      # 10개 종목만 수집 & 결과 출력 (DB 저장 없음)
+      - name: Run test pipeline (10 stocks)
+        run: python test_pipeline.py

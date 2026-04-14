@@ -1,0 +1,47 @@
+name: Daily RS Rating Update
+
+on:
+  # 평일 오후 4시 KST = UTC 07:00
+  schedule:
+    - cron: '0 7 * * 1-5'
+
+  # 수동 실행 (테스트용)
+  workflow_dispatch:
+
+jobs:
+  update-rs:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 코드 체크아웃
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Python 환경 세팅
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. 의존성 설치
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 4. .env 생성 (GitHub Secrets → 로컬 .env)
+      - name: Create .env file
+        run: |
+          echo "KIS_APP_KEY=${{ secrets.KIS_APP_KEY }}" >> .env
+          echo "KIS_APP_SECRET=${{ secrets.KIS_APP_SECRET }}" >> .env
+
+      # 5. RS Rating 파이프라인 실행
+      - name: Run RS Rating pipeline
+        run: python db_sqlite.py
+
+      # 6. 변경된 DB를 자동 커밋 & 푸시
+      - name: Commit and push updated DB
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add quant_dashboard.db
+          git diff --cached --quiet || git commit -m "📊 RS Rating 업데이트: $(date -u +%Y-%m-%d)"
+          git push

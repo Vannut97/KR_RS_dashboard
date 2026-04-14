@@ -1,0 +1,5 @@
+FinanceDataReader
+requests
+pandas
+numpy
+python-dotenv

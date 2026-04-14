@@ -93,19 +93,17 @@ def calculate_rs_ratings(df_prices):
     # 정렬: IBD RS Rating 높은 순 (NULL은 하단)
     res_df = res_df.sort_values('rs_rating', ascending=False).reset_index(drop=True)
 
-    # 수익률 컬럼을 %로 변환하여 가독성 향상 (컬럼을 object로 변환 후 문자열 대입)
+    # 수익률 컬럼을 %로 변환하여 가독성 향상
     for period in windows.keys():
         col = f'ret_{period}'
-        res_df[col] = res_df[col].astype(object)
-        mask = res_df[col].notna()
-        res_df.loc[mask, col] = (res_df.loc[mask, col].astype(float) * 100).round(2).astype(str) + '%'
+        res_df[col] = res_df[col].apply(
+            lambda x: f'{x * 100:.2f}%' if pd.notna(x) else x
+        )
 
     # composite_score도 % 변환
-    res_df['composite_score'] = res_df['composite_score'].astype(object)
-    mask_cs = res_df['composite_score'].notna()
-    res_df.loc[mask_cs, 'composite_score'] = (
-        res_df.loc[mask_cs, 'composite_score'].astype(float) * 100
-    ).round(2).astype(str) + '%'
+    res_df['composite_score'] = res_df['composite_score'].apply(
+        lambda x: f'{x * 100:.2f}%' if pd.notna(x) else x
+    )
 
     total = len(res_df)
     ibd_count = ibd_mask.sum()

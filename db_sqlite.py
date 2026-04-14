@@ -7,12 +7,14 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
 
-    # 2. 테이블 생성 (IBD composite_score, rs_rating 컬럼 추가)
+    # 2. 테이블 생성
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS rs_ratings (
         date TEXT,
         ticker TEXT,
         latest_close INTEGER,
+        market_cap REAL,
+        avg_vol_10d INTEGER,
         ret_1d REAL,
         ret_1w REAL,
         ret_1m REAL,
@@ -33,10 +35,12 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
 
     # 기존 테이블에 새 컬럼이 없으면 추가 (마이그레이션)
     existing_cols = [row[1] for row in cursor.execute('PRAGMA table_info(rs_ratings)').fetchall()]
-    if 'composite_score' not in existing_cols:
-        cursor.execute('ALTER TABLE rs_ratings ADD COLUMN composite_score REAL')
-    if 'rs_rating' not in existing_cols:
-        cursor.execute('ALTER TABLE rs_ratings ADD COLUMN rs_rating INTEGER')
+    for col_name, col_type in [
+        ('composite_score', 'REAL'), ('rs_rating', 'INTEGER'),
+        ('market_cap', 'REAL'), ('avg_vol_10d', 'INTEGER'),
+    ]:
+        if col_name not in existing_cols:
+            cursor.execute(f'ALTER TABLE rs_ratings ADD COLUMN {col_name} {col_type}')
 
     today_str = datetime.now().strftime('%Y-%m-%d')
     print(f"\n[{today_str}] 🚀 SQLite 데이터 저장 시작...")
@@ -60,6 +64,8 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
             today_str,
             row['ticker'],
             int(row['latest_close']),
+            parse_float(row.get('market_cap')),
+            parse_int(row.get('avg_vol_10d')),
             parse_float(row['ret_1D']), parse_float(row['ret_1W']),
             parse_float(row['ret_1M']), parse_float(row['ret_3M']),
             parse_float(row['ret_6M']), parse_float(row['ret_12M']),
@@ -74,10 +80,11 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
     try:
         cursor.executemany('''
         INSERT OR REPLACE INTO rs_ratings
-        (date, ticker, latest_close, ret_1d, ret_1w, ret_1m, ret_3m, ret_6m, ret_12m,
+        (date, ticker, latest_close, market_cap, avg_vol_10d,
+         ret_1d, ret_1w, ret_1m, ret_3m, ret_6m, ret_12m,
          rs_1d, rs_1w, rs_1m, rs_3m, rs_6m, rs_12m,
          composite_score, rs_rating)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', records)
 
         conn.commit()

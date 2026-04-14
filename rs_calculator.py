@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from kis_fetcher import run_batch_collection
+from fdr_auth import get_filtered_universe
 
 # ==========================================
 # IBD 방식 가중치 (윌리엄 오닐 스타일)
@@ -34,9 +35,14 @@ def calculate_rs_ratings(df_prices):
         group = group.reset_index(drop=True)
         current_close = group.iloc[-1]['close']
 
+        # 10일 평균 거래량 계산
+        last_10 = group.tail(10)['volume']
+        avg_vol_10d = int(last_10.mean()) if len(last_10) > 0 else None
+
         stock_data = {
             'ticker': ticker,
             'latest_close': current_close,
+            'avg_vol_10d': avg_vol_10d,
         }
 
         # 기간별 수익률 산출 — 데이터 부족 시 None(NULL)
@@ -54,6 +60,12 @@ def calculate_rs_ratings(df_prices):
     if res_df.empty:
         print("계산 가능한 데이터가 부족합니다.")
         return res_df
+
+    # 시가총액 병합 (fdr_auth 유니버스에서 가져옴, 억원 단위)
+    universe_df = get_filtered_universe()
+    cap_map = universe_df.set_index('ticker')['market_cap']
+    res_df['market_cap'] = res_df['ticker'].map(cap_map)
+    res_df['market_cap'] = (res_df['market_cap'] / 1e8).round(0)  # 원 → 억원
 
     # ------------------------------------------
     # 1. 기간별 개별 RS Rating (1~99점)

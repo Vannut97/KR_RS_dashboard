@@ -119,7 +119,7 @@ if search_query:
 # 표시용 컬럼 정리
 # ==========================================
 display_cols = [
-    "ticker", "name", "market", "latest_close",
+    "ticker", "name", "market", "latest_close", "market_cap", "avg_vol_10d",
     "rs_rating", "composite_score",
     "rs_1d", "rs_1w", "rs_1m", "rs_3m", "rs_6m", "rs_12m",
     "ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_12m",
@@ -153,6 +153,8 @@ st.dataframe(
         "name": st.column_config.TextColumn("종목명", width="medium"),
         "market": st.column_config.TextColumn("시장", width="small"),
         "latest_close": st.column_config.NumberColumn("종가", format="%d"),
+        "market_cap": st.column_config.NumberColumn("시가총액(억)", format="%,.0f"),
+        "avg_vol_10d": st.column_config.NumberColumn("10일평균거래량", format="%,.0f"),
         "rs_rating": st.column_config.NumberColumn("⭐ RS Rating", width="small"),
         "composite_score": st.column_config.NumberColumn("복합점수"),
         "rs_1d": st.column_config.NumberColumn("RS 1D", width="small"),

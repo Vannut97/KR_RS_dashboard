@@ -2,7 +2,14 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
+def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db"):
+    """RS Rating 데이터를 SQLite에 저장한다.
+
+    Args:
+        df_rs: RS Rating DataFrame
+        trading_date: 실제 거래일 문자열 (YYYY-MM-DD)
+        db_name: DB 파일 경로
+    """
     # 1. SQLite DB 연결
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
@@ -42,8 +49,17 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
         if col_name not in existing_cols:
             cursor.execute(f'ALTER TABLE rs_ratings ADD COLUMN {col_name} {col_type}')
 
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    print(f"\n[{today_str}] 🚀 SQLite 데이터 저장 시작...")
+    # 3. 중복 저장 방지: 해당 거래일 데이터가 이미 존재하면 스킵
+    existing_count = cursor.execute(
+        'SELECT COUNT(*) FROM rs_ratings WHERE date = ?', (trading_date,)
+    ).fetchone()[0]
+
+    if existing_count > 0:
+        print(f"\n⏭️ [{trading_date}] 데이터가 이미 존재합니다 ({existing_count}건). 저장을 건너뜁니다.")
+        conn.close()
+        return
+
+    print(f"\n[{trading_date}] 🚀 SQLite 데이터 저장 시작...")
 
     records = []
 
@@ -58,10 +74,10 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
             return None
         return int(val)
 
-    # 3. 데이터 변환
+    # 4. 데이터 변환
     for _, row in df_rs.iterrows():
         records.append((
-            today_str,
+            trading_date,
             row['ticker'],
             int(row['latest_close']),
             parse_float(row.get('market_cap')),
@@ -76,7 +92,7 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
             parse_int(row['rs_rating']),
         ))
 
-    # 4. 데이터 삽입
+    # 5. 데이터 삽입
     try:
         cursor.executemany('''
         INSERT OR REPLACE INTO rs_ratings
@@ -97,11 +113,52 @@ def save_to_sqlite(df_rs, db_name="quant_dashboard.db"):
     finally:
         conn.close()
 
+
+def get_latest_trading_date(df_prices):
+    """수집된 가격 데이터에서 실제 최신 거래일을 추출한다."""
+    latest = df_prices['date'].max()
+    # YYYYMMDD → YYYY-MM-DD
+    return f"{latest[:4]}-{latest[4:6]}-{latest[6:8]}"
+
+
+def is_already_collected(trading_date, db_name="quant_dashboard.db"):
+    """해당 거래일 데이터가 이미 DB에 존재하는지 확인한다."""
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT COUNT(*) FROM rs_ratings WHERE date = ?', (trading_date,)
+    )
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count > 0
+
+
 if __name__ == "__main__":
     from rs_calculator import calculate_rs_ratings
-    from kis_fetcher import run_batch_collection
+    from kis_fetcher import get_access_token, fetch_1yr_daily_price, run_batch_collection
+    from fdr_auth import get_filtered_universe
 
+    # ── 1단계: 종목 1개로 거래일 사전 체크 ──
+    print("🔍 거래일 사전 체크 중 (종목 1개 샘플 수집)...")
+    universe_df = get_filtered_universe()
+    sample_ticker = universe_df['ticker'].iloc[0]
+    token = get_access_token()
+    sample_df = fetch_1yr_daily_price(sample_ticker, token)
+
+    if sample_df.empty:
+        print("❌ 샘플 수집 실패. 파이프라인을 종료합니다.")
+        exit(1)
+
+    trading_date = get_latest_trading_date(sample_df)
+    print(f"📅 최신 거래일: {trading_date}")
+
+    if is_already_collected(trading_date):
+        print(f"⏭️ [{trading_date}] 데이터가 이미 존재합니다. 공휴일 또는 중복 실행으로 판단하여 종료합니다.")
+        exit(0)
+
+    # ── 2단계: 전체 수집 진행 ──
+    print(f"✅ [{trading_date}] 신규 거래일 확인. 전체 수집을 시작합니다.\n")
     df_prices = run_batch_collection()
     if df_prices is not None and not df_prices.empty:
         df_rs = calculate_rs_ratings(df_prices)
-        save_to_sqlite(df_rs)
+        save_to_sqlite(df_rs, trading_date)

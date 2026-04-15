@@ -24,6 +24,7 @@ jobs:
         run: |
           echo "KIS_APP_KEY=${{ secrets.KIS_APP_KEY }}" >> .env
           echo "KIS_APP_SECRET=${{ secrets.KIS_APP_SECRET }}" >> .env
+          echo "DART_API_KEY=${{ secrets.DART_API_KEY }}" >> .env
 
       # 10개 종목만 수집 & 결과 출력 (DB 저장 없음)
       - name: Run test pipeline (10 stocks)

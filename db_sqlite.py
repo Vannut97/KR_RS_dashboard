@@ -288,6 +288,60 @@ def get_all_report_tickers(db_name="quant_dashboard.db"):
     return result
 
 
+# ==========================================
+# 워치리스트
+# ==========================================
+def _ensure_watchlist_table(cursor):
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS watchlist (
+        ticker     TEXT PRIMARY KEY,
+        added_date TEXT,
+        note       TEXT
+    )
+    ''')
+
+
+def add_to_watchlist(ticker, note="", db_name="quant_dashboard.db"):
+    """워치리스트에 종목 추가 (이미 있으면 무시)."""
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    _ensure_watchlist_table(cursor)
+    cursor.execute(
+        "INSERT OR IGNORE INTO watchlist (ticker, added_date, note) VALUES (?, ?, ?)",
+        (ticker, datetime.now().strftime("%Y-%m-%d"), note)
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_from_watchlist(ticker, db_name="quant_dashboard.db"):
+    """워치리스트에서 종목 제거."""
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM watchlist WHERE ticker = ?", (ticker,))
+    conn.commit()
+    conn.close()
+
+
+def get_watchlist(db_name="quant_dashboard.db"):
+    """워치리스트 전체 반환 [{ticker, added_date, note}, ...]."""
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='watchlist'"
+    )
+    if not cursor.fetchone():
+        conn.close()
+        return []
+    cursor.execute(
+        "SELECT ticker, added_date, note FROM watchlist ORDER BY added_date DESC"
+    )
+    result = [{"ticker": r[0], "added_date": r[1], "note": r[2]}
+              for r in cursor.fetchall()]
+    conn.close()
+    return result
+
+
 def get_all_reports(db_name="quant_dashboard.db"):
     """전체 보고서 목록을 최신순으로 반환.
 

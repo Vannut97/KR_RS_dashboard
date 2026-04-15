@@ -241,6 +241,80 @@ def find_missing_fundamental_tickers(tickers, db_name="quant_dashboard.db"):
 
 
 # ==========================================
+# 보고서 인덱스
+# ==========================================
+def _ensure_report_index_table(cursor):
+    """report_index 테이블 생성 (없을 때만)."""
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS report_index (
+        ticker      TEXT,
+        quarter     TEXT,
+        report_date TEXT,
+        report_path TEXT,
+        PRIMARY KEY (ticker, quarter)
+    )
+    ''')
+
+
+def save_report_index(ticker, quarter, report_date, report_path,
+                      db_name="quant_dashboard.db"):
+    """보고서 생성 기록을 report_index 테이블에 저장한다."""
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    _ensure_report_index_table(cursor)
+    cursor.execute(
+        "INSERT OR REPLACE INTO report_index "
+        "(ticker, quarter, report_date, report_path) VALUES (?, ?, ?, ?)",
+        (ticker, quarter, report_date, report_path)
+    )
+    conn.commit()
+    conn.close()
+    print(f"✅ report_index 저장: {ticker} ({quarter})")
+
+
+def get_all_report_tickers(db_name="quant_dashboard.db"):
+    """보고서가 한 번이라도 생성된 ticker set 반환 (dashboard 배지용)."""
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='report_index'"
+    )
+    if not cursor.fetchone():
+        conn.close()
+        return set()
+    cursor.execute("SELECT DISTINCT ticker FROM report_index")
+    result = {row[0] for row in cursor.fetchall()}
+    conn.close()
+    return result
+
+
+def get_all_reports(db_name="quant_dashboard.db"):
+    """전체 보고서 목록을 최신순으로 반환.
+
+    Returns:
+        list of dict: [{ticker, quarter, report_date, report_path}, ...]
+    """
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='report_index'"
+    )
+    if not cursor.fetchone():
+        conn.close()
+        return []
+    cursor.execute(
+        "SELECT ticker, quarter, report_date, report_path "
+        "FROM report_index ORDER BY report_date DESC, ticker"
+    )
+    result = [
+        {"ticker": r[0], "quarter": r[1], "report_date": r[2], "report_path": r[3]}
+        for r in cursor.fetchall()
+    ]
+    conn.close()
+    return result
+
+
+# ==========================================
 # 메인 파이프라인
 # ==========================================
 if __name__ == "__main__":

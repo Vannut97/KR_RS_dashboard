@@ -3,6 +3,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import sqlite3
 import pandas as pd
+import plotly.express as px
 import FinanceDataReader as fdr
 from db_sqlite import get_all_report_tickers, get_all_reports
 
@@ -245,6 +246,108 @@ with tab_screener:
                 f"— 보고서 탭에서 확인하세요.",
                 icon="🆕",
             )
+
+    # ── RS × 펀더멘탈 산점도 ──
+    st.markdown("---")
+    st.subheader("🔭 RS Rating × EPS YoY 산점도")
+
+    if has_fundamentals:
+        # 기준일 전체 데이터에서 RS 상위 200종목 (펀더멘탈 있는 종목만)
+        df_bubble = (
+            df[df["date"] == selected_date]
+            .dropna(subset=["rs_rating", "eps_yoy"])
+            .nlargest(200, "rs_rating")
+            .copy()
+        )
+
+        # 버블 크기: 시가총액 sqrt 스케일 (대형주가 지나치게 커지지 않도록)
+        df_bubble["_bubble"] = (
+            df_bubble["market_cap"].fillna(100).clip(lower=10) ** 0.5
+        )
+
+        # 호버 표기용 컬럼 포맷
+        for col in ["eps_yoy", "revenue_yoy", "roe", "roa", "net_margin", "op_margin"]:
+            if col in df_bubble.columns:
+                df_bubble[col] = df_bubble[col].round(1)
+        if "latest_close" in df_bubble.columns:
+            df_bubble["latest_close"] = df_bubble["latest_close"].astype(int)
+
+        hover_cols = {c: True for c in [
+            "ticker", "revenue_yoy", "roe", "roa",
+            "net_margin", "op_margin", "latest_close", "market_cap",
+        ] if c in df_bubble.columns}
+        hover_cols["_bubble"] = False  # 버블 크기 컬럼 숨김
+
+        fig = px.scatter(
+            df_bubble,
+            x="rs_rating",
+            y="eps_yoy",
+            size="_bubble",
+            size_max=55,
+            color="market",
+            color_discrete_map={"KOSPI": "#003A70", "KOSDAQ": "#16a34a"},
+            hover_name="name",
+            hover_data=hover_cols,
+            labels={
+                "rs_rating":    "RS Rating",
+                "eps_yoy":      "EPS YoY (%)",
+                "revenue_yoy":  "매출 YoY (%)",
+                "roe":          "ROE (%)",
+                "roa":          "ROA (%)",
+                "net_margin":   "순이익률 (%)",
+                "op_margin":    "영업이익률 (%)",
+                "latest_close": "현재가 (₩)",
+                "market_cap":   "시가총액 (억)",
+                "market":       "시장",
+                "ticker":       "종목코드",
+            },
+            title=f"RS Rating × EPS YoY — RS 상위 200종목 ({selected_date})",
+        )
+
+        # 기준선: RS=90 (수직), EPS YoY=20% (수평)
+        fig.add_vline(
+            x=90, line_dash="dash", line_color="#dc2626", line_width=1.2, opacity=0.6,
+            annotation_text="RS 90", annotation_position="top right",
+            annotation_font_color="#dc2626",
+        )
+        fig.add_hline(
+            y=20, line_dash="dash", line_color="#ea580c", line_width=1.2, opacity=0.6,
+            annotation_text="EPS YoY 20%", annotation_position="right",
+            annotation_font_color="#ea580c",
+        )
+
+        # 오른쪽 위 사분면 라벨
+        y_max = df_bubble["eps_yoy"].quantile(0.95)
+        fig.add_annotation(
+            x=97, y=y_max,
+            text="⭐ 매수 후보군",
+            showarrow=False,
+            font=dict(size=12, color="#dc2626"),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#dc2626",
+            borderwidth=1,
+        )
+
+        fig.update_layout(
+            height=560,
+            plot_bgcolor="#f8fafc",
+            paper_bgcolor="white",
+            legend=dict(orientation="h", y=-0.12),
+            margin=dict(t=50, b=60),
+            xaxis=dict(title="RS Rating", range=[0, 100], gridcolor="#e5e7eb"),
+            yaxis=dict(title="EPS YoY (%)", gridcolor="#e5e7eb"),
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "💡 버블 크기 = 시가총액  |  "
+            "🔵 KOSPI  🟢 KOSDAQ  |  "
+            "오른쪽 위 사분면(RS≥90 & EPS YoY≥20%)이 핵심 후보군"
+        )
+    else:
+        st.info("펀더멘탈 데이터 수집 완료 후 산점도가 활성화됩니다.")
+
+    st.markdown("---")
 
     # ── 데이터 테이블 ──
     st.subheader(f"📋 스크리너 결과 ({len(df_display)}개)")

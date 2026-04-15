@@ -50,16 +50,6 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db"):
         if col_name not in existing_cols:
             cursor.execute(f'ALTER TABLE rs_ratings ADD COLUMN {col_name} {col_type}')
 
-    # 3. 중복 저장 방지: 해당 거래일 데이터가 이미 존재하면 스킵
-    existing_count = cursor.execute(
-        'SELECT COUNT(*) FROM rs_ratings WHERE date = ?', (trading_date,)
-    ).fetchone()[0]
-
-    if existing_count > 0:
-        print(f"\n⏭️ [{trading_date}] 데이터가 이미 존재합니다 ({existing_count}건). 저장을 건너뜁니다.")
-        conn.close()
-        return
-
     print(f"\n[{trading_date}] 🚀 SQLite 데이터 저장 시작...")
 
     records = []
@@ -222,16 +212,32 @@ def get_latest_trading_date(df_prices):
     return f"{latest[:4]}-{latest[4:6]}-{latest[6:8]}"
 
 
-def is_already_collected(trading_date, db_name="quant_dashboard.db"):
-    """해당 거래일 데이터가 이미 DB에 존재하는지 확인한다."""
+def find_missing_fundamental_tickers(tickers, db_name="quant_dashboard.db"):
+    """유니버스 중 fundamentals 테이블에 한 번도 기록된 적 없는 종목을 반환한다.
+
+    Args:
+        tickers: 현재 유니버스의 전체 ticker 리스트
+        db_name: DB 파일 경로
+
+    Returns:
+        누락된 ticker 리스트 (테이블이 없으면 전체 리스트 반환)
+    """
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
+
+    # 테이블 존재 여부 체크
     cursor.execute(
-        'SELECT COUNT(*) FROM rs_ratings WHERE date = ?', (trading_date,)
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='fundamentals'"
     )
-    count = cursor.fetchone()[0]
+    if not cursor.fetchone():
+        conn.close()
+        return list(tickers)  # 최초 실행 = 전부 공란
+
+    cursor.execute("SELECT DISTINCT ticker FROM fundamentals")
+    existing = {row[0] for row in cursor.fetchall()}
     conn.close()
-    return count > 0
+
+    return [t for t in tickers if t not in existing]
 
 
 # ==========================================
@@ -239,40 +245,54 @@ def is_already_collected(trading_date, db_name="quant_dashboard.db"):
 # ==========================================
 if __name__ == "__main__":
     from rs_calculator import calculate_rs_ratings
-    from kis_fetcher import get_access_token, fetch_1yr_daily_price, run_batch_collection
+    from kis_fetcher import run_batch_collection
     from fdr_auth import get_filtered_universe
 
-    # ── 1단계: 종목 1개로 거래일 사전 체크 ──
-    print("🔍 거래일 사전 체크 중 (종목 1개 샘플 수집)...")
-    universe_df = get_filtered_universe()
-    sample_ticker = universe_df['ticker'].iloc[0]
-    token = get_access_token()
-    sample_df = fetch_1yr_daily_price(sample_ticker, token)
+    # ── 1단계: RS 파이프라인 (전체 종목 수집) ──
+    print("🚀 전체 종목 가격 수집을 시작합니다.\n")
+    df_prices = run_batch_collection()
 
-    if sample_df.empty:
-        print("❌ 샘플 수집 실패. 파이프라인을 종료합니다.")
+    if df_prices is None or df_prices.empty:
+        print("❌ 가격 데이터 수집 실패. 파이프라인을 종료합니다.")
         exit(1)
 
-    trading_date = get_latest_trading_date(sample_df)
-    print(f"📅 최신 거래일: {trading_date}")
+    trading_date = get_latest_trading_date(df_prices)
+    print(f"\n📅 최신 거래일: {trading_date}")
 
-    if is_already_collected(trading_date):
-        print(f"⏭️ [{trading_date}] 데이터가 이미 존재합니다. 공휴일 또는 중복 실행으로 판단하여 종료합니다.")
-        exit(0)
+    df_rs = calculate_rs_ratings(df_prices)
+    save_to_sqlite(df_rs, trading_date)
 
-    # ── 2단계: RS 파이프라인 ──
-    print(f"✅ [{trading_date}] 신규 거래일 확인. 전체 수집을 시작합니다.\n")
-    df_prices = run_batch_collection()
-    if df_prices is not None and not df_prices.empty:
-        df_rs = calculate_rs_ratings(df_prices)
-        save_to_sqlite(df_rs, trading_date)
-
-    # ── 3단계: 펀더멘탈 파이프라인 (DART_API_KEY가 있을 때만) ──
+    # ── 2단계: 펀더멘탈 파이프라인 (DART_API_KEY가 있을 때만) ──
+    #
+    # 수집 정책:
+    #  (A) 3/6/9/12월의 금요일  → 전체 종목 리프레시 (분기 실적 반영)
+    #  (B) 그 외 일자          → 누락 종목(신규 상장 · 초기 실행)만 우선 수집
+    #  (C) (B) 결과 누락 종목이 0개면 스킵
     if os.environ.get("DART_API_KEY"):
         from dart_fetcher import run_fundamental_collection
-        tickers = universe_df['ticker'].tolist()
-        df_fund = run_fundamental_collection(tickers)
-        if df_fund is not None and not df_fund.empty:
-            save_fundamentals(df_fund, trading_date)
+
+        universe_df = get_filtered_universe()
+        all_tickers = universe_df['ticker'].tolist()
+
+        now = datetime.now()
+        is_earnings_refresh_day = (
+            now.weekday() == 4                # 금요일
+            and now.month in (3, 6, 9, 12)    # 분기 실적 반영 월
+        )
+
+        if is_earnings_refresh_day:
+            target_tickers = all_tickers
+            print(f"\n📅 [{now:%Y-%m-%d}] 분기 실적 리프레시 데이 — 전체 {len(target_tickers)}개 종목 펀더멘탈 수집")
+        else:
+            target_tickers = find_missing_fundamental_tickers(all_tickers)
+            if target_tickers:
+                print(f"\n🔍 [{now:%Y-%m-%d}] 누락/신규 종목 펀더멘탈 우선 수집: {len(target_tickers)}개")
+            else:
+                print(f"\n✅ [{now:%Y-%m-%d}] 누락 종목 없음 & 리프레시 데이 아님 — 펀더멘탈 수집 스킵")
+
+        if target_tickers:
+            df_fund = run_fundamental_collection(target_tickers)
+            if df_fund is not None and not df_fund.empty:
+                save_fundamentals(df_fund, trading_date)
     else:
         print("\n⚠️ DART_API_KEY가 없어 펀더멘탈 수집을 건너뜁니다.")

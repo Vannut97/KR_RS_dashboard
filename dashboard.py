@@ -31,7 +31,12 @@ def load_rs_data():
 
 @st.cache_data(ttl=600)
 def load_fundamentals():
-    """SQLite에서 펀더멘탈 데이터 로드."""
+    """SQLite에서 '종목당 최신' 펀더멘탈 데이터 로드.
+
+    펀더멘탈은 3/6/9/12월 금요일에만 전체 리프레시되고, 그 외에는 신규 종목만
+    수집되므로 일자별 스냅샷이 희소하다. 대시보드에서는 종목별로 가장 최근에
+    수집된 펀더멘탈 1건만 사용해 RS 테이블과 ticker 기준으로 조인한다.
+    """
     conn = sqlite3.connect(DB_PATH)
     # fundamentals 테이블 존재 여부 확인
     tables = pd.read_sql(
@@ -42,7 +47,20 @@ def load_fundamentals():
         conn.close()
         return pd.DataFrame()
 
-    df = pd.read_sql("SELECT * FROM fundamentals", conn)
+    df = pd.read_sql(
+        """
+        SELECT f.*
+        FROM fundamentals f
+        INNER JOIN (
+            SELECT ticker, MAX(date) AS max_date
+            FROM fundamentals
+            GROUP BY ticker
+        ) latest
+          ON f.ticker = latest.ticker
+         AND f.date = latest.max_date
+        """,
+        conn,
+    )
     conn.close()
     return df
 
@@ -64,10 +82,11 @@ df_universe = load_universe()
 # 종목명 & 시장 정보 병합
 df = df_rs.merge(df_universe, on="ticker", how="left")
 
-# 펀더멘탈 병합 (같은 date + ticker 기준)
+# 펀더멘탈 병합 — 종목별 최신 1건만 사용하므로 ticker 키로 조인
+# (load_fundamentals()가 이미 ticker당 최신 date 1건만 로드함)
 if not df_fund.empty:
     fund_cols = [
-        "date", "ticker", "latest_quarter",
+        "ticker", "latest_quarter",
         "revenue_yoy", "eps_yoy", "op_profit_yoy",
         "op_margin", "net_margin", "op_margin_chg", "net_margin_chg",
         "roe", "roa", "debt_ratio",
@@ -76,7 +95,7 @@ if not df_fund.empty:
         "annual_op_margin", "annual_net_margin",
     ]
     fund_cols = [c for c in fund_cols if c in df_fund.columns]
-    df = df.merge(df_fund[fund_cols], on=["date", "ticker"], how="left")
+    df = df.merge(df_fund[fund_cols], on="ticker", how="left")
 
 has_fundamentals = not df_fund.empty and "eps_yoy" in df.columns
 

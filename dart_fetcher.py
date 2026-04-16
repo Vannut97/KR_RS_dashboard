@@ -91,12 +91,17 @@ def extract_accounts(items):
     target = cfs if cfs else items
 
     def parse_amt(s):
+        """금액 문자열 → 정수 변환. 소수점 포함 값(EPS 등)도 처리."""
         if not s:
             return None
+        s = s.strip().replace(",", "")
         try:
-            return int(s.strip().replace(",", ""))
+            return int(s)
         except ValueError:
-            return None
+            try:
+                return int(round(float(s)))
+            except ValueError:
+                return None
 
     # 계정명 매핑 (다양한 표기 대응)
     keywords = {
@@ -123,9 +128,16 @@ def extract_accounts(items):
                 result["bfefrmtrm"][key] = parse_amt(item.get("bfefrmtrm_amount"))
                 break
 
-        # EPS (주당순이익)
+        # EPS (주당순이익) — 다양한 DART 계정명 대응
+        # 예: 기본주당이익(손실), 기본주당순이익(손실), 희석주당이익(손실), 주당순이익 등
         if "eps" not in result["thstrm"]:
-            if ("주당" in acct and "이익" in acct) or acct == "주당순이익":
+            is_eps = (
+                ("기본주당" in acct and ("이익" in acct or "손실" in acct))
+                or ("주당순이익" in acct)
+                or (acct == "주당이익(손실)")
+                or ("주당" in acct and "순이익" in acct)
+            )
+            if is_eps:
                 result["thstrm"]["eps"] = parse_amt(item.get("thstrm_amount"))
                 result["frmtrm"]["eps"] = parse_amt(item.get("frmtrm_amount"))
                 result["bfefrmtrm"]["eps"] = parse_amt(item.get("bfefrmtrm_amount"))
@@ -212,8 +224,13 @@ def collect_single_fundamental(ticker, corp_code):
 
         # YoY 성장률 (%)
         result["revenue_yoy"] = pct_growth(curr.get("revenue"), prev.get("revenue"))
-        result["eps_yoy"] = pct_growth(curr.get("eps"), prev.get("eps"))
         result["op_profit_yoy"] = pct_growth(curr.get("op_profit"), prev.get("op_profit"))
+
+        # EPS YoY: EPS 파싱 성공 시 우선 사용, 실패 시 당기순이익 YoY로 fallback
+        eps_yoy = pct_growth(curr.get("eps"), prev.get("eps"))
+        if eps_yoy is None:
+            eps_yoy = pct_growth(curr.get("net_income"), prev.get("net_income"))
+        result["eps_yoy"] = eps_yoy
 
         # 마진율 (%)
         result["op_margin"] = pct_margin(curr.get("op_profit"), curr.get("revenue"))

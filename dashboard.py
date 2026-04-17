@@ -475,20 +475,6 @@ with tab_screener:
         else:
             st.info("스크리너 결과에서 종목을 먼저 필터링하세요.")
 
-    # ── RS Rating 분포 차트 ──
-    st.markdown("---")
-    ch1, ch2 = st.columns(2)
-    with ch1:
-        st.subheader("📊 RS Rating 분포")
-        if not df_display.empty:
-            st.bar_chart(df_display["rs_rating"].dropna().value_counts().sort_index())
-    with ch2:
-        st.subheader("📈 RS Rating 구간별 종목 수")
-        if not df_display.empty:
-            bins, labels = [0, 20, 40, 60, 80, 99], ["1-20", "21-40", "41-60", "61-80", "81-99"]
-            df_display["rs_group"] = pd.cut(df_display["rs_rating"], bins=bins, labels=labels)
-            st.bar_chart(df_display["rs_group"].value_counts().sort_index())
-
     # ── CSV 다운로드 ──
     st.markdown("---")
     if not df_display.empty:

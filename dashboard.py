@@ -86,6 +86,34 @@ def load_rs_history(ticker):
     return df
 
 
+@st.cache_data(ttl=600)
+def load_rs_surge(min_delta=10):
+    """1주일(~5 거래일) 전 대비 RS Rating 10pt 이상 급등 종목 반환."""
+    conn = sqlite3.connect(DB_PATH)
+    dates = pd.read_sql(
+        "SELECT DISTINCT date FROM rs_ratings ORDER BY date DESC LIMIT 10", conn
+    )["date"].tolist()
+    if len(dates) < 6:
+        conn.close()
+        return pd.DataFrame(), "", ""
+    latest   = dates[0]
+    week_ago = dates[5]   # ~5 거래일 전
+    df = pd.read_sql(f"""
+        SELECT r1.ticker,
+               r1.rs_rating  AS rs_now,
+               r2.rs_rating  AS rs_prev,
+               (r1.rs_rating - r2.rs_rating) AS rs_delta,
+               r1.latest_close, r1.ret_1w
+        FROM rs_ratings r1
+        JOIN rs_ratings r2 ON r1.ticker = r2.ticker
+        WHERE r1.date = '{latest}' AND r2.date = '{week_ago}'
+          AND (r1.rs_rating - r2.rs_rating) >= {min_delta}
+        ORDER BY rs_delta DESC
+    """, conn)
+    conn.close()
+    return df, latest, week_ago
+
+
 # ==========================================
 # 데이터 준비
 # ==========================================
@@ -93,6 +121,7 @@ df_rs       = load_rs_data()
 df_fund     = load_fundamentals()
 df_universe = load_universe()
 report_tickers, all_reports = load_report_index()
+df_surge, surge_latest, surge_week_ago = load_rs_surge()
 
 df = df_rs.merge(df_universe, on="ticker", how="left")
 
@@ -159,6 +188,14 @@ with tab_screener:
             op_margin_min   = st.number_input("영업이익률 최소 (%)", value=-9999.0, step=1.0)
 
     st.sidebar.markdown("---")
+    with st.sidebar.expander("📈 신고가 근접 필터"):
+        near_high_pct = st.slider(
+            "52주 고가 대비 하락폭 허용 (%)",
+            min_value=-50, max_value=0, value=-100, step=1,
+            help="예: -5 → 52주 고가의 95% 이상인 종목만 표시 / -100 → 필터 비활성",
+        )
+
+    st.sidebar.markdown("---")
     price_min    = st.sidebar.number_input("💰 최소 종가", value=0, step=1000)
     price_max    = st.sidebar.number_input("💰 최대 종가 (0=무제한)", value=0, step=10000)
     st.sidebar.markdown("---")
@@ -186,6 +223,15 @@ with tab_screener:
             filtered = filtered[filtered["roe"].fillna(-99999) >= roe_min_f]
         if op_margin_min > -9999:
             filtered = filtered[filtered["op_margin"].fillna(-99999) >= op_margin_min]
+    # ── 52주 고가 추정 (ret_xM 역산으로 기준가 계산 → 최댓값) ──
+    for p, r in [("_p1m","ret_1m"),("_p3m","ret_3m"),("_p6m","ret_6m"),("_p12m","ret_12m")]:
+        filtered[p] = filtered["latest_close"] / (1 + filtered[r].fillna(0) / 100)
+    filtered["_high52w"] = filtered[["latest_close","_p1m","_p3m","_p6m","_p12m"]].max(axis=1)
+    filtered["high52w_gap"] = ((filtered["latest_close"] / filtered["_high52w"]) - 1) * 100
+
+    if near_high_pct > -100:
+        filtered = filtered[filtered["high52w_gap"] >= near_high_pct]
+
     filtered = filtered[filtered["latest_close"] >= price_min]
     if price_max > 0:
         filtered = filtered[filtered["latest_close"] <= price_max]
@@ -199,7 +245,7 @@ with tab_screener:
     # ── 표시 컬럼 ──
     display_cols = [
         "ticker", "has_report", "name", "market",
-        "latest_close", "market_cap", "avg_vol_10d",
+        "latest_close", "high52w_gap", "market_cap", "avg_vol_10d",
         "rs_rating", "composite_score",
         "rs_1d", "rs_1w", "rs_1m", "rs_3m", "rs_6m", "rs_12m",
         "ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_12m",
@@ -239,6 +285,25 @@ with tab_screener:
                 f"📄 **{latest_report_date}** 신규 보고서: "
                 f"**{', '.join(latest_report_tickers)}** — 보고서 탭에서 확인",
                 icon="🆕",
+            )
+
+    # ── 1W RS 급등 종목 알림 ──
+    if not df_surge.empty:
+        with st.expander(
+            f"🚀 **1주일 RS 급등 종목** ({surge_week_ago} → {surge_latest}) "
+            f"— {len(df_surge)}개 (10pt↑)", expanded=True
+        ):
+            surge_display = df_surge.merge(
+                df_universe[["ticker","name","market"]], on="ticker", how="left"
+            )[["ticker","name","market","rs_prev","rs_now","rs_delta","ret_1w","latest_close"]]
+            surge_display.columns = [
+                "코드","종목명","시장","RS(전주)","RS(현재)","RS변화","1W수익률(%)","현재가"
+            ]
+            st.dataframe(
+                surge_display.style.background_gradient(
+                    subset=["RS변화"], cmap="Greens"
+                ).format({"RS변화": "+{:.0f}", "1W수익률(%)": "{:.1f}%", "현재가": "{:,.0f}"}),
+                use_container_width=True, hide_index=True,
             )
 
     # ── RS × 펀더멘탈 산점도 ──
@@ -311,12 +376,15 @@ with tab_screener:
             bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
         )
         fig_sc.update_layout(
-            height=560, plot_bgcolor="#f8fafc", paper_bgcolor="white",
-            legend=dict(orientation="h", y=-0.12), margin=dict(t=50, b=60),
+            height=680, plot_bgcolor="#f8fafc", paper_bgcolor="white",
+            legend=dict(orientation="h", y=-0.08), margin=dict(t=50, b=50, l=60, r=40),
             xaxis=dict(title="RS Rating", range=[x_min, x_max], gridcolor="#e5e7eb"),
             yaxis=dict(title="EPS YoY (%)", range=[y_min, y_max], gridcolor="#e5e7eb"),
         )
-        st.plotly_chart(fig_sc, use_container_width=True)
+        # 정사각형 유지: 중앙 3/5 컬럼에 height=680 배치
+        _, col_sc, _ = st.columns([1, 3, 1])
+        with col_sc:
+            st.plotly_chart(fig_sc, use_container_width=True)
         st.caption(
             "💡 버블 크기 = 시가총액 | 🔵 KOSPI  🟢 KOSDAQ | "
             "오른쪽 위 사분면(RS≥90 & EPS YoY≥20%)이 핵심 후보군"

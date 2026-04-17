@@ -28,24 +28,42 @@ st.markdown("""
 .main .block-container {
     padding-top: 1rem;
     padding-bottom: 0rem;
+    max-width: 100% !important;
 }
 /* Streamlit 기본 푸터 숨김 */
 footer { visibility: hidden; height: 0; }
 /* 상단 헤더바 숨김 */
-header[data-testid="stHeader"] { height: 0; }
+header[data-testid="stHeader"] { display: none !important; }
+/* 스크롤바 완전 제거 */
+::-webkit-scrollbar { display: none !important; width: 0 !important; }
+* { scrollbar-width: none !important; -ms-overflow-style: none !important; }
 /* 전체 페이지 스크롤 제거 */
 html, body {
     overflow: hidden !important;
-    height: 100% !important;
+    height: 100vh !important;
+    margin: 0 !important;
 }
-/* 메인 컨테이너 내부만 스크롤 허용 */
 [data-testid="stAppViewContainer"] {
     overflow: hidden !important;
     height: 100vh !important;
 }
-section[data-testid="stMain"] {
-    overflow-y: auto;
-    height: 100vh;
+/* 탭 컨테이너: 탭 안에서만 스크롤 */
+[data-testid="stMain"] > div {
+    overflow: hidden !important;
+    height: 100vh !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stVerticalBlock"] {
+    overflow: hidden !important;
+}
+/* 탭 패널 내부만 스크롤 허용 */
+[data-testid="stTabContent"] {
+    overflow-y: auto !important;
+    height: calc(100vh - 120px) !important;
+    scrollbar-width: none !important;
+}
+[data-testid="stTabContent"]::-webkit-scrollbar {
+    display: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -543,21 +561,19 @@ with tab_screener:
             "오른쪽 위 사분면(RS≥90 & EPS YoY≥20%)이 핵심 후보군"
         )
 
-        # ── 버블 클릭 → 워치리스트 추가 ──
+        # ── 버블 클릭 → 워치리스트 즉시 추가 + toast 알림 ──
         pts = getattr(getattr(sc_event, "selection", None), "points", [])
         if pts:
             cd = pts[0].get("customdata", [])
             clicked_ticker = cd[0] if cd else None
             if clicked_ticker:
-                clicked_name = ticker_name_map.get(clicked_ticker, clicked_ticker)
-                col_info, col_btn = st.columns([4, 1])
-                with col_info:
-                    st.info(f"🖱️ 선택: **{clicked_name}**", icon="📌")
-                with col_btn:
-                    if st.button("⭐ 워치리스트 추가", key="scatter_wl_add"):
-                        wl_add(clicked_ticker)
-                        st.success(f"✅ {clicked_ticker} 추가됨!")
-                        st.rerun()
+                # 이미 추가된 종목인지 확인
+                already = [w["ticker"] for w in wl_get()]
+                if clicked_ticker in already:
+                    st.toast(f"이미 워치리스트에 있습니다: {ticker_name_map.get(clicked_ticker, clicked_ticker)}", icon="📌")
+                else:
+                    wl_add(clicked_ticker)
+                    st.toast(f"⭐ {ticker_name_map.get(clicked_ticker, clicked_ticker)} 워치리스트에 추가됨!", icon="⭐")
     else:
         st.info("펀더멘탈 데이터 수집 완료 후 산점도가 활성화됩니다.")
 

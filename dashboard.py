@@ -347,22 +347,28 @@ with tab_screener:
         # cliponaxis=False: 버블이 축 경계에서 잘리지 않도록
         fig_sc.update_traces(cliponaxis=False)
 
-        # ── 축 범위: 데이터 min/max 기반 동적 계산 (고정 중심점 없음) ──
-        # outlier 클리핑 후 실제 데이터 범위 산출
+        # ── 축 범위: 중심점(RS=85, EPS=10%) 항상 정중앙 + 데이터 극단값 기반 대칭 전개 ──
+        X_CENTER, Y_CENTER = 85, 10
+
         x_vals = df_bubble["rs_rating"].dropna()
         y_vals = df_bubble["eps_yoy"].dropna().clip(-200, 500)
 
-        x_lo, x_hi = float(x_vals.min()), float(x_vals.max())
-        y_lo, y_hi = float(y_vals.min()), float(y_vals.max())
+        # X축: 오른쪽은 RS 최대값 99 고정, 왼쪽은 데이터 최솟값
+        #   → 중심(85)에서 좌/우 중 더 먼 거리로 대칭
+        x_dist = max(99 - X_CENTER,               # 오른쪽: 99까지 14pt
+                     X_CENTER - float(x_vals.min()))  # 왼쪽:  data min까지 거리
+        x_pad  = max(x_dist * 0.08, 3)
+        x_min  = X_CENTER - x_dist - x_pad
+        x_max  = X_CENTER + x_dist + x_pad   # 99 초과 가능(대칭 유지)
 
-        # 버블 오버플로 여백: 데이터 범위의 15% (최소 고정값 보장)
-        x_pad = max((x_hi - x_lo) * 0.15, 5)
-        y_pad = max((y_hi - y_lo) * 0.15, 20)
-
-        x_min = max(0,   x_lo - x_pad)
-        x_max = min(100, x_hi + x_pad)
-        y_min = y_lo - y_pad
-        y_max = y_hi + y_pad
+        # Y축: max/min 모두 데이터 극단값
+        #   → 중심(10%)에서 상/하 중 더 먼 거리로 대칭
+        y_dist = max(float(y_vals.max()) - Y_CENTER,   # 위쪽: data max까지 거리
+                     Y_CENTER - float(y_vals.min()))    # 아래쪽: data min까지 거리
+        y_dist = max(y_dist, 30)                        # 최소 범위 보장
+        y_pad  = max(y_dist * 0.10, 15)
+        y_min  = Y_CENTER - y_dist - y_pad
+        y_max  = Y_CENTER + y_dist + y_pad
 
         fig_sc.add_vline(x=90, line_dash="dash", line_color="#dc2626",
             line_width=1.2, opacity=0.6, annotation_text="RS 90",
@@ -378,15 +384,9 @@ with tab_screener:
             bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
         )
 
-        # ── 정사각형 반응형 레이아웃 ──
-        # [1,3,1] 중앙 컬럼(≈60% 너비)에 height 동적 계산
-        # X/Y 데이터 범위 비율로 실제 정사각형에 가깝게 height 조정
-        x_span = x_max - x_min
-        y_span = y_max - y_min
-        aspect = y_span / x_span if x_span > 0 else 1.0
-        aspect = max(0.5, min(aspect, 2.0))   # 0.5~2.0 범위로 제한
-        base_h = 660
-        dyn_h  = int(base_h * aspect)
+        # ── 정사각형 레이아웃 ──
+        # 픽셀 정사각형 = width ≈ height 고정. height=680 기준
+        dyn_h = 680
 
         fig_sc.update_layout(
             height=dyn_h, plot_bgcolor="#f8fafc", paper_bgcolor="white",

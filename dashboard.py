@@ -502,17 +502,21 @@ with tab_screener:
         y_max  = Y_CENTER + y_dist + y_pad
 
         fig_sc.add_vline(x=90, line_dash="dash", line_color="#dc2626",
-            line_width=1.2, opacity=0.6, annotation_text="RS 90",
-            annotation_position="top right", annotation_font_color="#dc2626")
+            line_width=1.5, opacity=0.8,
+            annotation_text="RS 90",
+            annotation_position="top right",
+            annotation_font=dict(size=14, color="#dc2626", family="Arial Black, sans-serif"))
         fig_sc.add_hline(y=20, line_dash="dash", line_color="#ea580c",
-            line_width=1.2, opacity=0.6, annotation_text="EPS YoY 20%",
-            annotation_position="right", annotation_font_color="#ea580c")
+            line_width=1.5, opacity=0.8,
+            annotation_text="EPS YoY 20%",
+            annotation_position="right",
+            annotation_font=dict(size=14, color="#ea580c", family="Arial Black, sans-serif"))
         fig_sc.add_annotation(
             x=x_min + (x_max - x_min) * 0.92,
             y=y_min + (y_max - y_min) * 0.92,
             text="⭐ 매수 후보군", showarrow=False,
-            font=dict(size=12, color="#dc2626"),
-            bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
+            font=dict(size=14, color="#dc2626", family="Arial Black, sans-serif"),
+            bgcolor="rgba(255,255,255,0.9)", bordercolor="#dc2626", borderwidth=1.5,
         )
 
         # ── 산점도: JS로 뷰포트 높이 측정 후 Plotly 높이 동적 적용 ──
@@ -552,13 +556,36 @@ with tab_screener:
 """, height=0)
 
         # Python 기본값 (JS 로드 전 초기 렌더): 뷰포트 모름 → 안전값 600
+        _axis_font  = dict(size=14, color="#111111", family="Arial Black, sans-serif")
+        _tick_font  = dict(size=13, color="#111111", family="Arial, sans-serif")
+        _title_font = dict(size=15, color="#111111", family="Arial Black, sans-serif")
+
         fig_sc.update_layout(
             height=600,
             plot_bgcolor="#f8fafc", paper_bgcolor="white",
-            legend=dict(orientation="h", y=-0.06),
-            margin=dict(t=40, b=40, l=60, r=40),
-            xaxis=dict(title="RS Rating (±0.4 jitter)", range=[x_min, x_max], gridcolor="#e5e7eb"),
-            yaxis=dict(title="EPS YoY (%)", range=[y_min, y_max], gridcolor="#e5e7eb"),
+            font=dict(size=13, color="#111111"),
+            legend=dict(
+                orientation="h", y=-0.06,
+                font=dict(size=13, color="#111111"),
+            ),
+            margin=dict(t=40, b=50, l=70, r=50),
+            xaxis=dict(
+                title=dict(text="RS Rating (±0.4 jitter)", font=_title_font),
+                tickfont=_tick_font,
+                range=[x_min, x_max], gridcolor="#e5e7eb",
+                linecolor="#555555", linewidth=1.5,
+            ),
+            yaxis=dict(
+                title=dict(text="EPS YoY (%)", font=_title_font),
+                tickfont=_tick_font,
+                range=[y_min, y_max], gridcolor="#e5e7eb",
+                linecolor="#555555", linewidth=1.5,
+            ),
+        )
+
+        # 기준선 annotation 폰트도 강화
+        fig_sc.update_annotations(
+            font=dict(size=13, color="#111111"),
         )
 
         _lp, col_sc, _rp = st.columns([0.5, 9, 0.5])

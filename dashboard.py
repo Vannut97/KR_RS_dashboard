@@ -21,25 +21,45 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── 레이아웃 정리 CSS ──
+# ── 레이아웃 최소 여백 CSS ──
 st.markdown("""
 <style>
-/* 상단 패딩 축소 */
+/* 메인 컨테이너 패딩 최소화 */
 .main .block-container {
-    padding-top: 1rem;
-    padding-bottom: 0rem;
+    padding-top: 0.3rem !important;
+    padding-bottom: 0rem !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
 }
-/* Streamlit 기본 푸터 숨김 */
-footer { visibility: hidden; height: 0; }
-/* 상단 헤더바 숨김 */
-header[data-testid="stHeader"] { height: 0; }
-/* 스크롤바 시각적으로만 숨김 (스크롤 기능은 유지) */
-::-webkit-scrollbar { width: 0px; height: 0px; background: transparent; }
+/* 푸터·헤더 완전 제거 */
+footer { display: none !important; }
+header[data-testid="stHeader"] { display: none !important; }
+/* 스크롤바 숨김 */
+::-webkit-scrollbar { width: 0px; height: 0px; }
 html { scrollbar-width: none; -ms-overflow-style: none; }
+/* 탭 바 패딩 축소 */
+[data-testid="stTabs"] { margin-top: 0 !important; }
+[data-testid="stTabBar"] { padding-top: 0 !important; padding-bottom: 0 !important; }
+/* 탭 패널 상단 여백 제거 */
+[data-testid="stTabContent"] { padding-top: 0.2rem !important; }
+/* h4 타이틀 마진 최소화 */
+h4 { margin-top: 0.2rem !important; margin-bottom: 0.2rem !important; line-height: 1.2 !important; }
+/* subheader 마진 최소화 */
+h3 { margin-top: 0.2rem !important; margin-bottom: 0.2rem !important; }
+/* expander 마진 */
+[data-testid="stExpander"] { margin-top: 0.2rem !important; margin-bottom: 0 !important; }
+/* caption 마진 */
+[data-testid="stCaptionContainer"] { margin-top: 0 !important; padding-top: 0 !important; }
+/* info/alert 박스 마진 */
+[data-testid="stAlert"] { margin-top: 0.2rem !important; margin-bottom: 0.2rem !important; padding: 0.3rem 0.6rem !important; }
+/* metric 간격 */
+[data-testid="stMetric"] { padding: 0.2rem 0 !important; }
+/* column gap */
+[data-testid="stHorizontalBlock"] { gap: 0.5rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("#### 📊 KR RS Rating Screener")
+st.markdown("##### 📊 KR RS Rating Screener")
 
 DB_PATH = "quant_dashboard.db"
 
@@ -384,7 +404,7 @@ with tab_screener:
             )
 
     # ── RS × 펀더멘탈 산점도 ──
-    st.subheader("🔭 RS Rating × EPS YoY 산점도")
+    st.markdown("**🔭 RS Rating × EPS YoY 산점도**")
     if has_fundamentals:
         df_bubble = (
             df[df["date"] == selected_date]
@@ -500,7 +520,7 @@ with tab_screener:
         components.html("""
 <script>
 (function() {
-    var OFFSET = 380; // 차트 외 요소 합계(KPI+탭+헤더+캡션+expander+여유)
+    var OFFSET = 200; // 차트 외 요소 합계(타이틀+탭+캡션+expander+여유)
     var MIN_H  = 300;
 
     function applyHeight() {

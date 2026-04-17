@@ -372,39 +372,37 @@ with tab_screener:
                       f"{(df_display['has_report'] != '').sum()}개"
                       if "has_report" in df_display.columns else "0개")
 
-    # ── 신규 보고서 알림 ──
+    # ── 신규 보고서 알림 → 사이드바 ──
     if all_reports:
         latest_report_date    = all_reports[0]["report_date"]
         latest_report_tickers = [r["ticker"] for r in all_reports
                                   if r["report_date"] == latest_report_date]
         if latest_report_tickers:
-            st.info(
-                f"📄 **{latest_report_date}** 신규 보고서: "
-                f"**{', '.join(latest_report_tickers)}** — 보고서 탭에서 확인",
+            st.sidebar.markdown("---")
+            st.sidebar.info(
+                f"📄 **{latest_report_date}** 신규 보고서\n\n"
+                f"{', '.join(latest_report_tickers)}",
                 icon="🆕",
             )
 
-    # ── 1W RS 급등 종목 알림 ──
+    # ── 1W RS 급등 종목 알림 → 사이드바 ──
     if not df_surge.empty:
-        with st.expander(
-            f"🚀 **1주일 RS 급등 종목** ({surge_week_ago} → {surge_latest}) "
-            f"— {len(df_surge)}개 (10pt↑)", expanded=True
+        st.sidebar.markdown("---")
+        with st.sidebar.expander(
+            f"🚀 RS 급등 {len(df_surge)}개 (10pt↑)", expanded=False
         ):
             surge_display = df_surge.merge(
                 df_universe[["ticker","name","market"]], on="ticker", how="left"
-            )[["ticker","name","market","rs_prev","rs_now","rs_delta","ret_1w","latest_close"]]
-            surge_display.columns = [
-                "코드","종목명","시장","RS(전주)","RS(현재)","RS변화","1W수익률(%)","현재가"
-            ]
+            )[["ticker","name","rs_delta","ret_1w"]]
+            surge_display.columns = ["코드","종목명","RS변화","1W수익률(%)"]
             st.dataframe(
                 surge_display.style.background_gradient(
                     subset=["RS변화"], cmap="Greens"
-                ).format({"RS변화": "+{:.0f}", "1W수익률(%)": "{:.1f}%", "현재가": "{:,.0f}"}),
+                ).format({"RS변화": "+{:.0f}", "1W수익률(%)": "{:.1f}%"}),
                 use_container_width=True, hide_index=True,
             )
 
-    # ── RS × 펀더멘탈 산점도 ──
-    st.markdown("**🔭 RS Rating × EPS YoY 산점도**")
+    # ── RS × 펀더멘탈 산점도 (라벨 제거 → 차트 타이틀로 통합) ──
     if has_fundamentals:
         df_bubble = (
             df[df["date"] == selected_date]
@@ -524,7 +522,7 @@ with tab_screener:
         components.html("""
 <script>
 (function() {
-    var OFFSET = 200; // 차트 외 요소 합계(타이틀+탭+캡션+expander+여유)
+    var OFFSET = 130; // 차트 외 요소 합계(타이틀+탭+expander×2+여유)
     var MIN_H  = 300;
 
     function applyHeight() {
@@ -565,10 +563,10 @@ with tab_screener:
             plot_bgcolor="#f8fafc", paper_bgcolor="white",
             font=dict(size=13, color="#111111"),
             legend=dict(
-                orientation="h", y=-0.06,
+                orientation="h", y=-0.04,
                 font=dict(size=13, color="#111111"),
             ),
-            margin=dict(t=40, b=50, l=70, r=50),
+            margin=dict(t=30, b=45, l=65, r=45),
             xaxis=dict(
                 title=dict(text="RS Rating (±0.4 jitter)", font=_title_font),
                 tickfont=_tick_font,
@@ -594,10 +592,6 @@ with tab_screener:
                 fig_sc, use_container_width=True,
                 on_select="rerun", key="scatter_chart",
             )
-        st.caption(
-            "💡 버블 크기 = 시가총액 | 🔵 KOSPI  🟢 KOSDAQ | "
-            "오른쪽 위 사분면(RS≥90 & EPS YoY≥20%)이 핵심 후보군"
-        )
 
         # ── 버블 클릭 → 워치리스트 즉시 추가 + toast 알림 ──
         pts = getattr(getattr(sc_event, "selection", None), "points", [])

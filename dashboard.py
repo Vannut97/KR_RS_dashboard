@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
 import sqlite3
@@ -315,9 +316,12 @@ with tab_screener:
             .nlargest(200, "rs_rating")
             .copy()
         )
-        df_bubble["_bubble"] = (
-            df_bubble["market_cap"].fillna(100).clip(lower=10) ** 0.5
-        )
+        # 시가총액 로그 스케일 → [1, 100] 정규화
+        # 극단값(삼성전자 등)이 있어도 전 종목 버블 크기가 가시적으로 분포
+        mc = df_bubble["market_cap"].fillna(df_bubble["market_cap"].median()).clip(lower=1)
+        log_mc = np.log10(mc)
+        lo, hi = log_mc.min(), log_mc.max()
+        df_bubble["_bubble"] = ((log_mc - lo) / (hi - lo) * 90 + 10) if hi > lo else 50
         for col in ["eps_yoy", "revenue_yoy", "roe", "roa", "net_margin", "op_margin"]:
             if col in df_bubble.columns:
                 df_bubble[col] = df_bubble[col].round(1)
@@ -331,7 +335,7 @@ with tab_screener:
         fig_sc = px.scatter(
             df_bubble,
             x="rs_rating", y="eps_yoy",
-            size="_bubble", size_max=50,
+            size="_bubble", size_max=60,
             color="market",
             color_discrete_map={"KOSPI": "#003A70", "KOSDAQ": "#16a34a"},
             hover_name="name", hover_data=hover_cols,

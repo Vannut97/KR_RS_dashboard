@@ -497,18 +497,33 @@ with tab_screener:
             bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
         )
 
-        # ── 산점도: 전체 너비, 중앙 배치 ──
-        CHART_H = 460   # 차트 높이 (뷰포트 여유 확보)
-
+        # ── 산점도: 전체 너비, 16:9 반응형 높이 ──
         fig_sc.update_layout(
-            height=CHART_H, plot_bgcolor="#f8fafc", paper_bgcolor="white",
+            autosize=True,
+            plot_bgcolor="#f8fafc", paper_bgcolor="white",
             legend=dict(orientation="h", y=-0.06),
             margin=dict(t=40, b=40, l=60, r=40),
             xaxis=dict(title="RS Rating (±0.4 jitter)", range=[x_min, x_max], gridcolor="#e5e7eb"),
             yaxis=dict(title="EPS YoY (%)", range=[y_min, y_max], gridcolor="#e5e7eb"),
         )
 
-        # 좌우 여백으로 차트 중앙 집중
+        # CSS: Plotly 차트 컨테이너를 16:9 비율로 강제
+        st.markdown("""
+        <style>
+        div[data-testid="stPlotlyChart"] {
+            aspect-ratio: 16 / 9 !important;
+            height: auto !important;
+            width: 100% !important;
+        }
+        div[data-testid="stPlotlyChart"] > div,
+        div[data-testid="stPlotlyChart"] .js-plotly-plot,
+        div[data-testid="stPlotlyChart"] .plot-container {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
         _lp, col_sc, _rp = st.columns([0.5, 9, 0.5])
         with col_sc:
             sc_event = st.plotly_chart(

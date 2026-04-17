@@ -21,50 +21,20 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── 스크롤 제거 & 레이아웃 정리 CSS ──
+# ── 레이아웃 정리 CSS ──
 st.markdown("""
 <style>
 /* 상단 패딩 축소 */
 .main .block-container {
     padding-top: 1rem;
     padding-bottom: 0rem;
-    max-width: 100% !important;
 }
 /* Streamlit 기본 푸터 숨김 */
 footer { visibility: hidden; height: 0; }
 /* 상단 헤더바 숨김 */
-header[data-testid="stHeader"] { display: none !important; }
-/* 스크롤바 완전 제거 */
-::-webkit-scrollbar { display: none !important; width: 0 !important; }
-* { scrollbar-width: none !important; -ms-overflow-style: none !important; }
-/* 전체 페이지 스크롤 제거 */
-html, body {
-    overflow: hidden !important;
-    height: 100vh !important;
-    margin: 0 !important;
-}
-[data-testid="stAppViewContainer"] {
-    overflow: hidden !important;
-    height: 100vh !important;
-}
-/* 탭 컨테이너: 탭 안에서만 스크롤 */
-[data-testid="stMain"] > div {
-    overflow: hidden !important;
-    height: 100vh !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stVerticalBlock"] {
-    overflow: hidden !important;
-}
-/* 탭 패널 내부만 스크롤 허용 */
-[data-testid="stTabContent"] {
-    overflow-y: auto !important;
-    height: calc(100vh - 120px) !important;
-    scrollbar-width: none !important;
-}
-[data-testid="stTabContent"]::-webkit-scrollbar {
-    display: none !important;
-}
+header[data-testid="stHeader"] { height: 0; }
+/* Plotly 차트 iframe 내 스크롤바만 숨김 */
+.js-plotly-plot ::-webkit-scrollbar { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 

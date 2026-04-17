@@ -39,7 +39,7 @@ html { scrollbar-width: none; -ms-overflow-style: none; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 KR RS Rating Screener")
+st.markdown("#### 📊 KR RS Rating Screener")
 
 DB_PATH = "quant_dashboard.db"
 
@@ -342,17 +342,15 @@ with tab_screener:
     display_cols = [c for c in display_cols if c in filtered.columns]
     df_display   = filtered[display_cols].reset_index(drop=True)
 
-    # ── 요약 지표 ──
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("📅 기준일",    selected_date)
-    c2.metric("📋 필터 결과", f"{len(df_display)}개")
-    c3.metric("🏛️ 시장",      selected_market)
-    c4.metric("전체 종목",    f"{len(df[df['date'] == selected_date])}개")
-    c5.metric("📄 보고서 보유",
-              f"{(df_display['has_report'] != '').sum()}개"
-              if "has_report" in df_display.columns else "0개")
-
-    st.markdown("---")
+    # ── 요약 지표 → 사이드바 하단 ──
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**📊 현재 필터 결과**")
+    st.sidebar.metric("📅 기준일",     selected_date)
+    st.sidebar.metric("📋 필터 결과",  f"{len(df_display)}개")
+    st.sidebar.metric("전체 종목",     f"{len(df[df['date'] == selected_date])}개")
+    st.sidebar.metric("📄 보고서 보유",
+                      f"{(df_display['has_report'] != '').sum()}개"
+                      if "has_report" in df_display.columns else "0개")
 
     # ── 신규 보고서 알림 ──
     if all_reports:

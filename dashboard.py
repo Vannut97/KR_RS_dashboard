@@ -507,7 +507,7 @@ with tab_screener:
         fig_sc.add_hline(y=20, line_dash="dash", line_color="#ea580c",
             line_width=1.5, opacity=0.8,
             annotation_text="EPS YoY 20%",
-            annotation_position="right",
+            annotation_position="top left",
             annotation_font=dict(size=14, color="#ea580c", family="Arial Black, sans-serif"))
         fig_sc.add_annotation(
             x=x_min + (x_max - x_min) * 0.92,
@@ -586,25 +586,118 @@ with tab_screener:
             font=dict(size=13, color="#111111"),
         )
 
-        _lp, col_sc, _rp = st.columns([0.5, 9, 0.5])
+        # ── 산점도 + 우측 상세 패널 ──
+        col_sc, col_detail = st.columns([3, 1])
+
         with col_sc:
             sc_event = st.plotly_chart(
                 fig_sc, use_container_width=True,
                 on_select="rerun", key="scatter_chart",
             )
 
-        # ── 버블 클릭 → 워치리스트 즉시 추가 + toast 알림 ──
+        # ── 버블 클릭 처리 ──
         pts = getattr(getattr(sc_event, "selection", None), "points", [])
         if pts:
             cd = pts[0].get("customdata", [])
             clicked_ticker = cd[0] if cd else None
             if clicked_ticker:
+                st.session_state["detail_ticker"] = clicked_ticker
                 already = [w["ticker"] for w in wl_get()]
                 if clicked_ticker in already:
                     st.toast(f"이미 워치리스트에 있습니다: {ticker_name_map.get(clicked_ticker, clicked_ticker)}", icon="📌")
                 else:
                     wl_add(clicked_ticker)
                     st.toast(f"⭐ {ticker_name_map.get(clicked_ticker, clicked_ticker)} 워치리스트에 추가됨!", icon="⭐")
+
+        # ── 우측 상세 패널: 3개년 YoY 막대 그래프 ──
+        with col_detail:
+            detail_ticker = st.session_state.get("detail_ticker")
+            if detail_ticker and has_fundamentals:
+                fund_row = df_fund[df_fund["ticker"] == detail_ticker]
+                if not fund_row.empty:
+                    r = fund_row.iloc[0]
+                    name = ticker_name_map.get(detail_ticker, detail_ticker)
+
+                    labels = ["전전년", "전년", "최근"]
+                    eps_vals = [
+                        r.get("annual_eps_2yr") if pd.notna(r.get("annual_eps_2yr")) else None,
+                        r.get("annual_eps_yoy") if pd.notna(r.get("annual_eps_yoy")) else None,
+                        r.get("eps_yoy")         if pd.notna(r.get("eps_yoy"))        else None,
+                    ]
+                    rev_vals = [
+                        r.get("annual_revenue_2yr") if pd.notna(r.get("annual_revenue_2yr")) else None,
+                        r.get("annual_revenue_yoy") if pd.notna(r.get("annual_revenue_yoy")) else None,
+                        r.get("revenue_yoy")         if pd.notna(r.get("revenue_yoy"))        else None,
+                    ]
+
+                    def bar_colors(vals):
+                        return ["#3b82f6" if (v is not None and v >= 0) else "#ef4444"
+                                for v in vals]
+
+                    fig_bar = go.Figure()
+                    fig_bar.add_trace(go.Bar(
+                        name="EPS YoY%", x=labels, y=eps_vals,
+                        marker_color=bar_colors(eps_vals),
+                        text=[f"{v:.1f}%" if v is not None else "N/A" for v in eps_vals],
+                        textposition="outside", textfont=dict(size=12, color="#111111"),
+                    ))
+                    fig_bar.add_trace(go.Bar(
+                        name="매출 YoY%", x=labels, y=rev_vals,
+                        marker_color=bar_colors(rev_vals),
+                        text=[f"{v:.1f}%" if v is not None else "N/A" for v in rev_vals],
+                        textposition="outside", textfont=dict(size=12, color="#111111"),
+                        visible=False,
+                    ))
+                    fig_bar.update_layout(
+                        title=dict(text=name, font=dict(size=13, color="#111111"), x=0.5),
+                        height=560,
+                        paper_bgcolor="white", plot_bgcolor="#f8fafc",
+                        margin=dict(t=40, b=40, l=40, r=20),
+                        font=dict(size=12, color="#111111"),
+                        legend=dict(orientation="h", y=-0.08, font=dict(size=11)),
+                        yaxis=dict(
+                            title="YoY (%)",
+                            tickfont=dict(size=11, color="#111111"),
+                            gridcolor="#e5e7eb",
+                            zeroline=True, zerolinecolor="#555555", zerolinewidth=1.5,
+                        ),
+                        xaxis=dict(tickfont=dict(size=12, color="#111111")),
+                        updatemenus=[dict(
+                            type="buttons", direction="right",
+                            x=0.5, xanchor="center", y=1.12,
+                            buttons=[
+                                dict(label="EPS YoY",
+                                     method="update",
+                                     args=[{"visible": [True, False]},
+                                           {"title.text": f"{name} · EPS YoY 3개년"}]),
+                                dict(label="매출 YoY",
+                                     method="update",
+                                     args=[{"visible": [False, True]},
+                                           {"title.text": f"{name} · 매출 YoY 3개년"}]),
+                            ],
+                            bgcolor="#f1f5f9", bordercolor="#cbd5e1",
+                            font=dict(size=11, color="#111111"),
+                        )],
+                    )
+                    fig_bar.add_hline(y=0, line_color="#555555", line_width=1)
+                    st.plotly_chart(fig_bar, use_container_width=True, key="bar_detail")
+                else:
+                    st.markdown(
+                        "<div style='height:560px;display:flex;align-items:center;"
+                        "justify-content:center;color:#9ca3af;font-size:13px;"
+                        "border:1px dashed #374151;border-radius:8px'>"
+                        "펀더멘탈 데이터 없음</div>",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.markdown(
+                    "<div style='height:560px;display:flex;align-items:center;"
+                    "justify-content:center;color:#9ca3af;font-size:13px;"
+                    "border:1px dashed #374151;border-radius:8px;text-align:center;"
+                    "padding:20px'>"
+                    "📊<br><br>버블을 클릭하면<br>EPS · 매출<br>3개년 YoY가<br>표시됩니다</div>",
+                    unsafe_allow_html=True,
+                )
 
     else:
         st.info("펀더멘탈 데이터 수집 완료 후 산점도가 활성화됩니다.")

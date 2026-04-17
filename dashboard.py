@@ -33,8 +33,9 @@ st.markdown("""
 footer { visibility: hidden; height: 0; }
 /* 상단 헤더바 숨김 */
 header[data-testid="stHeader"] { height: 0; }
-/* Plotly 차트 iframe 내 스크롤바만 숨김 */
-.js-plotly-plot ::-webkit-scrollbar { display: none !important; }
+/* 스크롤바 시각적으로만 숨김 (스크롤 기능은 유지) */
+::-webkit-scrollbar { width: 0px; height: 0px; background: transparent; }
+html { scrollbar-width: none; -ms-overflow-style: none; }
 </style>
 """, unsafe_allow_html=True)
 

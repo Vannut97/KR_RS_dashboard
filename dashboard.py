@@ -9,8 +9,8 @@ import plotly.graph_objects as go
 import FinanceDataReader as fdr
 from db_sqlite import (
     get_all_report_tickers, get_all_reports,
-    add_to_watchlist, remove_from_watchlist, get_watchlist,
 )
+from datetime import date as _date
 
 # ==========================================
 # 페이지 설정
@@ -54,24 +54,64 @@ st.title("📊 KR RS Rating Screener")
 
 DB_PATH = "quant_dashboard.db"
 
-# ── 워치리스트 DB 경로 ──
-# CWD(현재 디렉토리)에 쓰기 가능하면 watchlist.db 사용,
-# 권한 문제 발생 시 /tmp/로 자동 폴백 (항상 쓰기 가능)
-def _resolve_wl_path():
-    for candidate in ["watchlist.db", "/tmp/watchlist.db"]:
+# ==========================================
+# Supabase 워치리스트 클라이언트
+# ==========================================
+def _init_supabase():
+    """Supabase 클라이언트 초기화.
+    Streamlit Cloud → st.secrets, 로컬 → .env 순으로 탐색."""
+    try:
+        from supabase import create_client
+        # Streamlit Cloud secrets 우선
         try:
-            import tempfile, sqlite3 as _sq
-            _c = _sq.connect(candidate)
-            _c.execute("CREATE TABLE IF NOT EXISTS _ping (x INTEGER)")
-            _c.execute("DROP TABLE IF EXISTS _ping")
-            _c.commit()
-            _c.close()
-            return candidate
+            url = st.secrets["supabase"]["url"]
+            key = st.secrets["supabase"]["key"]
         except Exception:
-            continue
-    return "/tmp/watchlist.db"
+            # 로컬 .env 폴백
+            from dotenv import load_dotenv
+            load_dotenv()
+            url = os.environ.get("SUPABASE_URL", "")
+            key = os.environ.get("SUPABASE_KEY", "")
+        if url and key:
+            return create_client(url, key)
+    except Exception:
+        pass
+    return None
 
-WL_DB_PATH = _resolve_wl_path()
+_sb = _init_supabase()
+
+
+def wl_add(ticker: str, note: str = ""):
+    """워치리스트 추가 (이미 있으면 무시)."""
+    today = str(_date.today())
+    if _sb:
+        _sb.table("watchlist").upsert(
+            {"ticker": ticker, "added_date": today, "note": note},
+            on_conflict="ticker",          # 이미 있으면 덮어쓰지 않음
+            ignore_duplicates=True,
+        ).execute()
+    else:
+        st.error("Supabase 연결 실패: SUPABASE_URL / SUPABASE_KEY 확인 필요")
+
+
+def wl_remove(ticker: str):
+    """워치리스트 제거."""
+    if _sb:
+        _sb.table("watchlist").delete().eq("ticker", ticker).execute()
+    else:
+        st.error("Supabase 연결 실패")
+
+
+def wl_get() -> list[dict]:
+    """워치리스트 전체 반환 [{ticker, added_date, note}, ...]."""
+    if _sb:
+        try:
+            res = _sb.table("watchlist").select("ticker, added_date, note") \
+                      .order("added_date", desc=True).execute()
+            return res.data or []
+        except Exception:
+            return []
+    return []
 
 # ==========================================
 # 데이터 로드 함수
@@ -515,7 +555,7 @@ with tab_screener:
                     st.info(f"🖱️ 선택: **{clicked_name}**", icon="📌")
                 with col_btn:
                     if st.button("⭐ 워치리스트 추가", key="scatter_wl_add"):
-                        add_to_watchlist(clicked_ticker, db_name=WL_DB_PATH)
+                        wl_add(clicked_ticker)
                         st.success(f"✅ {clicked_ticker} 추가됨!")
                         st.rerun()
     else:
@@ -660,16 +700,16 @@ with tab_screener:
                 st.markdown("")
                 act1, act2 = st.columns(2)
                 with act1:
-                    wl_now     = get_watchlist(WL_DB_PATH)
+                    wl_now     = wl_get()
                     wl_tickers = [w["ticker"] for w in wl_now]
                     if sel_ticker in wl_tickers:
                         if st.button("⭐ 워치리스트 제거", key="dd_wl_rm"):
-                            remove_from_watchlist(sel_ticker, WL_DB_PATH)
+                            wl_remove(sel_ticker)
                             st.success(f"{sel_ticker} 제거됨")
                             st.rerun()
                     else:
                         if st.button("☆ 워치리스트 추가", key="dd_wl_add"):
-                            add_to_watchlist(sel_ticker, db_name=WL_DB_PATH)
+                            wl_add(sel_ticker)
                             st.success(f"{sel_ticker} 추가됨")
                             st.rerun()
                 with act2:
@@ -830,7 +870,7 @@ with tab_market:
 with tab_watchlist:
     st.subheader("⭐ 워치리스트")
 
-    wl_list = get_watchlist(WL_DB_PATH)
+    wl_list = wl_get()
 
     # ── 종목 추가/제거 컨트롤 ──
     ctrl_add, ctrl_rm = st.columns(2)
@@ -843,7 +883,7 @@ with tab_watchlist:
                 key="wl_add_sel",
             )
             if add_ticker and st.button("⭐ 추가", key="wl_add_btn"):
-                add_to_watchlist(add_ticker, db_name=WL_DB_PATH)
+                wl_add(add_ticker)
                 st.success(f"✅ {ticker_name_map.get(add_ticker, add_ticker)} 추가됨")
                 st.rerun()
     with ctrl_rm:
@@ -856,7 +896,7 @@ with tab_watchlist:
                     key="wl_rm_sel",
                 )
                 if rm_ticker and st.button("🗑️ 제거", key="wl_rm_btn"):
-                    remove_from_watchlist(rm_ticker, WL_DB_PATH)
+                    wl_remove(rm_ticker)
                     st.success(f"{rm_ticker} 제거됨")
                     st.rerun()
 
@@ -876,14 +916,14 @@ with tab_watchlist:
         recent_dates  = dates_sorted[-10:] if len(dates_sorted) >= 10 else dates_sorted
 
         # 워치리스트 티커별 RS 히스토리 (최근 10일)
-        conn_wl = sqlite3.connect(DB_PATH)
+        conn_rs = sqlite3.connect(DB_PATH)
         tickers_sql = ",".join([f"'{t}'" for t in wl_tickers])
         dates_sql   = ",".join([f"'{d}'" for d in recent_dates])
         df_rs_hist  = pd.read_sql(f"""
             SELECT ticker, date, rs_rating
             FROM rs_ratings
             WHERE ticker IN ({tickers_sql}) AND date IN ({dates_sql})
-        """, conn_wl)
+        """, conn_rs)
 
         # 등록일 기준 RS (등록일 이후 첫 거래일)
         def rs_at_added(ticker, added_date):
@@ -891,13 +931,13 @@ with tab_watchlist:
                 SELECT rs_rating FROM rs_ratings
                 WHERE ticker='{ticker}' AND date >= '{added_date}'
                 ORDER BY date ASC LIMIT 1
-            """, conn_wl)
+            """, conn_rs)
             if r.empty:
                 r = pd.read_sql(f"""
                     SELECT rs_rating FROM rs_ratings
                     WHERE ticker='{ticker}' AND date <= '{added_date}'
                     ORDER BY date DESC LIMIT 1
-                """, conn_wl)
+                """, conn_rs)
             return float(r["rs_rating"].iloc[0]) if not r.empty else None
 
         # ── Daily RS Board HTML 생성 ──
@@ -964,7 +1004,7 @@ with tab_watchlist:
                 + "</tr>"
             )
 
-        conn_wl.close()   # 모든 쿼리가 끝난 뒤 연결 종료
+        conn_rs.close()   # 모든 쿼리가 끝난 뒤 연결 종료
 
         legend = (
             "<div style='margin-top:8px;font-size:12px;color:#9ca3af'>"

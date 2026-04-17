@@ -54,6 +54,16 @@ st.title("📊 KR RS Rating Screener")
 
 DB_PATH = "quant_dashboard.db"
 
+# ── 워치리스트 전용 영구 DB 경로 ──
+# Streamlit Cloud: /mount/data/ 는 재시작/재배포 후에도 보존되는 영구 스토리지
+# 로컬 개발: 프로젝트 폴더의 watchlist.db 사용
+if os.path.isdir("/mount/src"):           # Streamlit Cloud 환경 감지
+    _WL_DIR = "/mount/data"
+    os.makedirs(_WL_DIR, exist_ok=True)
+    WL_DB_PATH = os.path.join(_WL_DIR, "watchlist.db")
+else:
+    WL_DB_PATH = "watchlist.db"           # 로컬: 별도 파일로 분리
+
 # ==========================================
 # 데이터 로드 함수
 # ==========================================
@@ -496,7 +506,7 @@ with tab_screener:
                     st.info(f"🖱️ 선택: **{clicked_name}**", icon="📌")
                 with col_btn:
                     if st.button("⭐ 워치리스트 추가", key="scatter_wl_add"):
-                        add_to_watchlist(clicked_ticker, db_name=DB_PATH)
+                        add_to_watchlist(clicked_ticker, db_name=WL_DB_PATH)
                         st.success(f"✅ {clicked_ticker} 추가됨!")
                         st.rerun()
     else:
@@ -641,16 +651,16 @@ with tab_screener:
                 st.markdown("")
                 act1, act2 = st.columns(2)
                 with act1:
-                    wl_now     = get_watchlist(DB_PATH)
+                    wl_now     = get_watchlist(WL_DB_PATH)
                     wl_tickers = [w["ticker"] for w in wl_now]
                     if sel_ticker in wl_tickers:
                         if st.button("⭐ 워치리스트 제거", key="dd_wl_rm"):
-                            remove_from_watchlist(sel_ticker, DB_PATH)
+                            remove_from_watchlist(sel_ticker, WL_DB_PATH)
                             st.success(f"{sel_ticker} 제거됨")
                             st.rerun()
                     else:
                         if st.button("☆ 워치리스트 추가", key="dd_wl_add"):
-                            add_to_watchlist(sel_ticker, db_name=DB_PATH)
+                            add_to_watchlist(sel_ticker, db_name=WL_DB_PATH)
                             st.success(f"{sel_ticker} 추가됨")
                             st.rerun()
                 with act2:
@@ -811,7 +821,7 @@ with tab_market:
 with tab_watchlist:
     st.subheader("⭐ 워치리스트")
 
-    wl_list = get_watchlist(DB_PATH)
+    wl_list = get_watchlist(WL_DB_PATH)
 
     # ── 종목 추가/제거 컨트롤 ──
     ctrl_add, ctrl_rm = st.columns(2)
@@ -824,7 +834,7 @@ with tab_watchlist:
                 key="wl_add_sel",
             )
             if add_ticker and st.button("⭐ 추가", key="wl_add_btn"):
-                add_to_watchlist(add_ticker, db_name=DB_PATH)
+                add_to_watchlist(add_ticker, db_name=WL_DB_PATH)
                 st.success(f"✅ {ticker_name_map.get(add_ticker, add_ticker)} 추가됨")
                 st.rerun()
     with ctrl_rm:
@@ -837,7 +847,7 @@ with tab_watchlist:
                     key="wl_rm_sel",
                 )
                 if rm_ticker and st.button("🗑️ 제거", key="wl_rm_btn"):
-                    remove_from_watchlist(rm_ticker, DB_PATH)
+                    remove_from_watchlist(rm_ticker, WL_DB_PATH)
                     st.success(f"{rm_ticker} 제거됨")
                     st.rerun()
 

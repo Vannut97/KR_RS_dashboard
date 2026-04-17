@@ -279,13 +279,22 @@ with tab_screener:
             },
             title=f"RS Rating × EPS YoY — RS 상위 200종목 ({selected_date})",
         )
-        # Y축 범위: 1~99 분위수 기준으로 클리핑 (극단값 outlier 방지)
-        y_vals = df_bubble["eps_yoy"].dropna()
-        y_lo = max(y_vals.quantile(0.01), -200)
-        y_hi = min(y_vals.quantile(0.99),  500)
-        y_pad = (y_hi - y_lo) * 0.12
-        y_min = y_lo - y_pad
-        y_max = y_hi + y_pad
+        # ── 축 범위: RS=85 / EPS=10% 가 항상 정중앙 교차점 ──
+        X_CENTER, Y_CENTER = 85, 10
+
+        # X축: 데이터와 중심(85) 간 최대 거리를 좌우 대칭으로 적용
+        x_vals = df_bubble["rs_rating"].dropna()
+        x_dist = max(abs(x_vals.max() - X_CENTER), abs(x_vals.min() - X_CENTER), 8)
+        x_pad  = x_dist * 0.08
+        x_min  = max(0,   X_CENTER - x_dist - x_pad)
+        x_max  = min(100, X_CENTER + x_dist + x_pad)
+
+        # Y축: outlier 클리핑(-200~500) 후 중심(10)에서 상하 대칭
+        y_vals  = df_bubble["eps_yoy"].dropna().clip(-200, 500)
+        y_dist  = max(abs(y_vals.max() - Y_CENTER), abs(y_vals.min() - Y_CENTER), 30)
+        y_pad   = y_dist * 0.08
+        y_min   = Y_CENTER - y_dist - y_pad
+        y_max   = Y_CENTER + y_dist + y_pad
 
         fig_sc.add_vline(x=90, line_dash="dash", line_color="#dc2626",
             line_width=1.2, opacity=0.6, annotation_text="RS 90",
@@ -293,17 +302,18 @@ with tab_screener:
         fig_sc.add_hline(y=20, line_dash="dash", line_color="#ea580c",
             line_width=1.2, opacity=0.6, annotation_text="EPS YoY 20%",
             annotation_position="right", annotation_font_color="#ea580c")
-        # 매수 후보군 라벨: y축 상단 15% 지점에 고정 (outlier에 흔들리지 않도록)
-        label_y = y_min + (y_max - y_min) * 0.88
+        # 매수 후보군 라벨: 우측 상단 사분면 고정 (축 범위 기준)
         fig_sc.add_annotation(
-            x=97, y=label_y, text="⭐ 매수 후보군", showarrow=False,
+            x=x_min + (x_max - x_min) * 0.92,
+            y=y_min + (y_max - y_min) * 0.92,
+            text="⭐ 매수 후보군", showarrow=False,
             font=dict(size=12, color="#dc2626"),
             bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
         )
         fig_sc.update_layout(
             height=560, plot_bgcolor="#f8fafc", paper_bgcolor="white",
             legend=dict(orientation="h", y=-0.12), margin=dict(t=50, b=60),
-            xaxis=dict(title="RS Rating", range=[0, 100], gridcolor="#e5e7eb"),
+            xaxis=dict(title="RS Rating", range=[x_min, x_max], gridcolor="#e5e7eb"),
             yaxis=dict(title="EPS YoY (%)", range=[y_min, y_max], gridcolor="#e5e7eb"),
         )
         st.plotly_chart(fig_sc, use_container_width=True)

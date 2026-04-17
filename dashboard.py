@@ -279,15 +279,24 @@ with tab_screener:
             },
             title=f"RS Rating × EPS YoY — RS 상위 200종목 ({selected_date})",
         )
+        # Y축 범위: 1~99 분위수 기준으로 클리핑 (극단값 outlier 방지)
+        y_vals = df_bubble["eps_yoy"].dropna()
+        y_lo = max(y_vals.quantile(0.01), -200)
+        y_hi = min(y_vals.quantile(0.99),  500)
+        y_pad = (y_hi - y_lo) * 0.12
+        y_min = y_lo - y_pad
+        y_max = y_hi + y_pad
+
         fig_sc.add_vline(x=90, line_dash="dash", line_color="#dc2626",
             line_width=1.2, opacity=0.6, annotation_text="RS 90",
             annotation_position="top right", annotation_font_color="#dc2626")
         fig_sc.add_hline(y=20, line_dash="dash", line_color="#ea580c",
             line_width=1.2, opacity=0.6, annotation_text="EPS YoY 20%",
             annotation_position="right", annotation_font_color="#ea580c")
-        y_top = df_bubble["eps_yoy"].quantile(0.95)
+        # 매수 후보군 라벨: y축 상단 15% 지점에 고정 (outlier에 흔들리지 않도록)
+        label_y = y_min + (y_max - y_min) * 0.88
         fig_sc.add_annotation(
-            x=97, y=y_top, text="⭐ 매수 후보군", showarrow=False,
+            x=97, y=label_y, text="⭐ 매수 후보군", showarrow=False,
             font=dict(size=12, color="#dc2626"),
             bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
         )
@@ -295,7 +304,7 @@ with tab_screener:
             height=560, plot_bgcolor="#f8fafc", paper_bgcolor="white",
             legend=dict(orientation="h", y=-0.12), margin=dict(t=50, b=60),
             xaxis=dict(title="RS Rating", range=[0, 100], gridcolor="#e5e7eb"),
-            yaxis=dict(title="EPS YoY (%)", gridcolor="#e5e7eb"),
+            yaxis=dict(title="EPS YoY (%)", range=[y_min, y_max], gridcolor="#e5e7eb"),
         )
         st.plotly_chart(fig_sc, use_container_width=True)
         st.caption(

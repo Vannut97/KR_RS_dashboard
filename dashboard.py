@@ -880,7 +880,6 @@ with tab_watchlist:
                     ORDER BY date DESC LIMIT 1
                 """, conn_wl)
             return float(r["rs_rating"].iloc[0]) if not r.empty else None
-        conn_wl.close()
 
         # ── Daily RS Board HTML 생성 ──
         def rs_cell(val):
@@ -945,6 +944,8 @@ with tab_watchlist:
                 + daily_cells
                 + "</tr>"
             )
+
+        conn_wl.close()   # 모든 쿼리가 끝난 뒤 연결 종료
 
         legend = (
             "<div style='margin-top:8px;font-size:12px;color:#9ca3af'>"

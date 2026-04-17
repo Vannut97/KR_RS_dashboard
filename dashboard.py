@@ -352,6 +352,12 @@ with tab_screener:
         lo, hi = log_mc.min(), log_mc.max()
         df_bubble["_bubble"] = ((log_mc - lo) / (hi - lo) * 47 + 3) if hi > lo else 25
 
+        # ── X축 지터: RS Rating 정수값 과밀 해소 (±0.4 랜덤 오프셋) ──
+        rng = np.random.default_rng(seed=42)   # seed 고정 → 새로고침마다 흔들리지 않음
+        df_bubble["_rs_jitter"] = (
+            df_bubble["rs_rating"] + rng.uniform(-0.4, 0.4, len(df_bubble))
+        )
+
         # ── 호버 컬러코딩 헬퍼 ──
         def fmt_metric(val, g_min, r_max, suffix="%"):
             """g_min 이상 → 녹색, r_max 이하 → 적색, 그 외 → 기본색"""
@@ -378,23 +384,28 @@ with tab_screener:
         df_bubble["_hc_mktcap"] = df_bubble["market_cap"].apply(
             lambda v: f"{v:,.0f}억" if pd.notna(v) else "N/A")
 
-        custom_cols = ["ticker","_hc_close","_hc_mktcap",
+        # rs_rating 실제값도 호버에 표시 (지터 적용 전 원본)
+        df_bubble["_hc_rs"] = df_bubble["rs_rating"].apply(
+            lambda v: f"{int(v)}" if pd.notna(v) else "N/A")
+
+        custom_cols = ["ticker","_hc_close","_hc_mktcap","_hc_rs",
                        "_hc_eps","_hc_rev","_hc_roe","_hc_roa","_hc_nm","_hc_om"]
         hovertemplate = (
             "<b>%{hovertext}</b>  "
             "<span style='color:gray;font-size:11px'>%{customdata[0]}</span><br>"
             "현재가: %{customdata[1]}  |  시총: %{customdata[2]}<br>"
+            "RS Rating: <b>%{customdata[3]}</b><br>"
             "<br>"
-            "EPS YoY: %{customdata[3]}<br>"
-            "매출 YoY: %{customdata[4]}<br>"
-            "ROE: %{customdata[5]}  |  ROA: %{customdata[6]}<br>"
-            "순이익률: %{customdata[7]}  |  영업이익률: %{customdata[8]}<br>"
+            "EPS YoY: %{customdata[4]}<br>"
+            "매출 YoY: %{customdata[5]}<br>"
+            "ROE: %{customdata[6]}  |  ROA: %{customdata[7]}<br>"
+            "순이익률: %{customdata[8]}  |  영업이익률: %{customdata[9]}<br>"
             "<extra></extra>"
         )
 
         fig_sc = px.scatter(
             df_bubble,
-            x="rs_rating", y="eps_yoy",
+            x="_rs_jitter", y="eps_yoy",   # 지터 적용 X축
             size="_bubble", size_max=30,
             color="market",
             color_discrete_map={"KOSPI": "#003A70", "KOSDAQ": "#16a34a"},
@@ -402,7 +413,11 @@ with tab_screener:
             custom_data=custom_cols,
             title=f"RS Rating × EPS YoY — RS 상위 200종목 ({selected_date})",
         )
-        fig_sc.update_traces(cliponaxis=False, hovertemplate=hovertemplate)
+        fig_sc.update_traces(
+            cliponaxis=False,
+            hovertemplate=hovertemplate,
+            opacity=0.75,           # 겹치는 버블 투과 표시
+        )
 
         # ── 축 범위 ──
         Y_CENTER = 10
@@ -441,7 +456,7 @@ with tab_screener:
         fig_sc.update_layout(
             height=dyn_h, plot_bgcolor="#f8fafc", paper_bgcolor="white",
             legend=dict(orientation="h", y=-0.08), margin=dict(t=50, b=50, l=60, r=40),
-            xaxis=dict(title="RS Rating", range=[x_min, x_max], gridcolor="#e5e7eb"),
+            xaxis=dict(title="RS Rating (±0.4 jitter)", range=[x_min, x_max], gridcolor="#e5e7eb"),
             yaxis=dict(title="EPS YoY (%)", range=[y_min, y_max], gridcolor="#e5e7eb"),
         )
 

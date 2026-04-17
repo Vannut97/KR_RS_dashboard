@@ -497,40 +497,72 @@ with tab_screener:
             bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
         )
 
-        # ── 정사각형 레이아웃 ──
-        # 픽셀 정사각형 = width ≈ height 고정. height=680 기준
-        dyn_h = 680
+        # ── 차트 + 테이블 좌우 나란히 (한 화면에 모두 표시) ──
+        PANEL_H = 500   # 차트·테이블 공통 높이 (px)
 
         fig_sc.update_layout(
-            height=dyn_h, plot_bgcolor="#f8fafc", paper_bgcolor="white",
-            legend=dict(orientation="h", y=-0.08), margin=dict(t=50, b=50, l=60, r=40),
+            height=PANEL_H, plot_bgcolor="#f8fafc", paper_bgcolor="white",
+            legend=dict(orientation="h", y=-0.08),
+            margin=dict(t=40, b=45, l=55, r=30),
             xaxis=dict(title="RS Rating (±0.4 jitter)", range=[x_min, x_max], gridcolor="#e5e7eb"),
             yaxis=dict(title="EPS YoY (%)", range=[y_min, y_max], gridcolor="#e5e7eb"),
         )
 
-        # CSS: 컨테이너 aspect-ratio 1:1 고정 + 내부 Plotly SVG 자동 채움
-        st.markdown("""
-        <style>
-        div[data-testid="stHorizontalBlock"]:has(.scatter-col)
-            div[data-testid="stPlotlyChart"] > div {
-            aspect-ratio: 1 / 1 !important;
-            height: auto !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        col_sc, col_tbl = st.columns([5, 4])
 
-        _, col_sc, _ = st.columns([1, 3, 1])
         with col_sc:
-            st.markdown('<div class="scatter-col"></div>', unsafe_allow_html=True)
             sc_event = st.plotly_chart(
                 fig_sc, use_container_width=True,
                 on_select="rerun", key="scatter_chart",
             )
+            st.caption(
+                "💡 버블 크기 = 시가총액 | 🔵 KOSPI  🟢 KOSDAQ | "
+                "오른쪽 위 사분면(RS≥90 & EPS YoY≥20%)이 핵심 후보군"
+            )
 
-        st.caption(
-            "💡 버블 크기 = 시가총액 | 🔵 KOSPI  🟢 KOSDAQ | "
-            "오른쪽 위 사분면(RS≥90 & EPS YoY≥20%)이 핵심 후보군"
-        )
+        with col_tbl:
+            st.subheader(f"📋 스크리너 결과 ({len(df_display)}개)")
+            column_config = {
+                "ticker":          st.column_config.TextColumn("종목코드",       width="small"),
+                "has_report":      st.column_config.TextColumn("보고서",         width="small"),
+                "name":            st.column_config.TextColumn("종목명",         width="medium"),
+                "market":          st.column_config.TextColumn("시장",           width="small"),
+                "latest_close":    st.column_config.NumberColumn("종가",         format="%d"),
+                "market_cap":      st.column_config.NumberColumn("시가총액(억)", format="%,.0f"),
+                "avg_vol_10d":     st.column_config.NumberColumn("10일평균거래량", format="%,.0f"),
+                "rs_rating":       st.column_config.NumberColumn("⭐ RS Rating", width="small"),
+                "composite_score": st.column_config.NumberColumn("복합점수"),
+                "rs_1d":  st.column_config.NumberColumn("RS 1D",  width="small"),
+                "rs_1w":  st.column_config.NumberColumn("RS 1W",  width="small"),
+                "rs_1m":  st.column_config.NumberColumn("RS 1M",  width="small"),
+                "rs_3m":  st.column_config.NumberColumn("RS 3M",  width="small"),
+                "rs_6m":  st.column_config.NumberColumn("RS 6M",  width="small"),
+                "rs_12m": st.column_config.NumberColumn("RS 12M", width="small"),
+            }
+            if has_fundamentals:
+                column_config.update({
+                    "eps_yoy":           st.column_config.NumberColumn("EPS YoY%",        format="%.1f"),
+                    "revenue_yoy":       st.column_config.NumberColumn("매출 YoY%",       format="%.1f"),
+                    "op_profit_yoy":     st.column_config.NumberColumn("영업이익 YoY%",   format="%.1f"),
+                    "op_margin":         st.column_config.NumberColumn("영업이익률%",     format="%.1f"),
+                    "net_margin":        st.column_config.NumberColumn("순이익률%",       format="%.1f"),
+                    "op_margin_chg":     st.column_config.NumberColumn("영업이익률 chg",  format="%.1f"),
+                    "net_margin_chg":    st.column_config.NumberColumn("순이익률 chg",    format="%.1f"),
+                    "roe":               st.column_config.NumberColumn("ROE%",             format="%.1f"),
+                    "roa":               st.column_config.NumberColumn("ROA%",             format="%.1f"),
+                    "debt_ratio":        st.column_config.NumberColumn("부채비율%",       format="%.1f"),
+                    "annual_eps_yoy":    st.column_config.NumberColumn("연간EPS YoY%",    format="%.1f"),
+                    "annual_revenue_yoy":st.column_config.NumberColumn("연간매출 YoY%",  format="%.1f"),
+                    "annual_eps_2yr":    st.column_config.NumberColumn("EPS 2yr%",        format="%.1f"),
+                    "annual_revenue_2yr":st.column_config.NumberColumn("매출 2yr%",       format="%.1f"),
+                    "annual_op_margin":  st.column_config.NumberColumn("연간영업이익률%", format="%.1f"),
+                    "annual_net_margin": st.column_config.NumberColumn("연간순이익률%",   format="%.1f"),
+                    "latest_quarter":    st.column_config.TextColumn("기준분기",          width="small"),
+                })
+            st.dataframe(
+                df_display, use_container_width=True, height=PANEL_H - 10,
+                column_config=column_config,
+            )
 
         # ── 버블 클릭 → 워치리스트 즉시 추가 + toast 알림 ──
         pts = getattr(getattr(sc_event, "selection", None), "points", [])
@@ -538,7 +570,6 @@ with tab_screener:
             cd = pts[0].get("customdata", [])
             clicked_ticker = cd[0] if cd else None
             if clicked_ticker:
-                # 이미 추가된 종목인지 확인
                 already = [w["ticker"] for w in wl_get()]
                 if clicked_ticker in already:
                     st.toast(f"이미 워치리스트에 있습니다: {ticker_name_map.get(clicked_ticker, clicked_ticker)}", icon="📌")
@@ -548,55 +579,7 @@ with tab_screener:
     else:
         st.info("펀더멘탈 데이터 수집 완료 후 산점도가 활성화됩니다.")
 
-    st.markdown("---")
-
-    # ── 데이터 테이블 ──
-    st.subheader(f"📋 스크리너 결과 ({len(df_display)}개)")
-    column_config = {
-        "ticker":          st.column_config.TextColumn("종목코드",       width="small"),
-        "has_report":      st.column_config.TextColumn("보고서",         width="small"),
-        "name":            st.column_config.TextColumn("종목명",         width="medium"),
-        "market":          st.column_config.TextColumn("시장",           width="small"),
-        "latest_close":    st.column_config.NumberColumn("종가",         format="%d"),
-        "market_cap":      st.column_config.NumberColumn("시가총액(억)", format="%,.0f"),
-        "avg_vol_10d":     st.column_config.NumberColumn("10일평균거래량", format="%,.0f"),
-        "rs_rating":       st.column_config.NumberColumn("⭐ RS Rating", width="small"),
-        "composite_score": st.column_config.NumberColumn("복합점수"),
-        "rs_1d":  st.column_config.NumberColumn("RS 1D",  width="small"),
-        "rs_1w":  st.column_config.NumberColumn("RS 1W",  width="small"),
-        "rs_1m":  st.column_config.NumberColumn("RS 1M",  width="small"),
-        "rs_3m":  st.column_config.NumberColumn("RS 3M",  width="small"),
-        "rs_6m":  st.column_config.NumberColumn("RS 6M",  width="small"),
-        "rs_12m": st.column_config.NumberColumn("RS 12M", width="small"),
-    }
-    if has_fundamentals:
-        column_config.update({
-            "eps_yoy":           st.column_config.NumberColumn("EPS YoY%",        format="%.1f"),
-            "revenue_yoy":       st.column_config.NumberColumn("매출 YoY%",       format="%.1f"),
-            "op_profit_yoy":     st.column_config.NumberColumn("영업이익 YoY%",   format="%.1f"),
-            "op_margin":         st.column_config.NumberColumn("영업이익률%",     format="%.1f"),
-            "net_margin":        st.column_config.NumberColumn("순이익률%",       format="%.1f"),
-            "op_margin_chg":     st.column_config.NumberColumn("영업이익률 chg",  format="%.1f"),
-            "net_margin_chg":    st.column_config.NumberColumn("순이익률 chg",    format="%.1f"),
-            "roe":               st.column_config.NumberColumn("ROE%",             format="%.1f"),
-            "roa":               st.column_config.NumberColumn("ROA%",             format="%.1f"),
-            "debt_ratio":        st.column_config.NumberColumn("부채비율%",       format="%.1f"),
-            "annual_eps_yoy":    st.column_config.NumberColumn("연간EPS YoY%",    format="%.1f"),
-            "annual_revenue_yoy":st.column_config.NumberColumn("연간매출 YoY%",  format="%.1f"),
-            "annual_eps_2yr":    st.column_config.NumberColumn("EPS 2yr%",        format="%.1f"),
-            "annual_revenue_2yr":st.column_config.NumberColumn("매출 2yr%",       format="%.1f"),
-            "annual_op_margin":  st.column_config.NumberColumn("연간영업이익률%", format="%.1f"),
-            "annual_net_margin": st.column_config.NumberColumn("연간순이익률%",   format="%.1f"),
-            "latest_quarter":    st.column_config.TextColumn("기준분기",          width="small"),
-        })
-
-    st.dataframe(
-        df_display, use_container_width=True, height=500,
-        column_config=column_config,
-    )
-
     # ── 드릴다운 패널 (종목 상세 분석) ──
-    st.markdown("---")
     with st.expander("🔍 종목 상세 분석", expanded=False):
         ticker_options = df_display["ticker"].tolist() if not df_display.empty else []
 

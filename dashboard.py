@@ -346,20 +346,51 @@ with tab_screener:
             .nlargest(200, "rs_rating")
             .copy()
         )
-        # 시가총액 로그 스케일 → [3, 50] 정규화 (이전 대비 1/2 축소)
+        # ── 버블 크기: 시가총액 로그 정규화 [3, 50] ──
         mc = df_bubble["market_cap"].fillna(df_bubble["market_cap"].median()).clip(lower=1)
         log_mc = np.log10(mc)
         lo, hi = log_mc.min(), log_mc.max()
         df_bubble["_bubble"] = ((log_mc - lo) / (hi - lo) * 47 + 3) if hi > lo else 25
-        for col in ["eps_yoy", "revenue_yoy", "roe", "roa", "net_margin", "op_margin"]:
-            if col in df_bubble.columns:
-                df_bubble[col] = df_bubble[col].round(1)
 
-        hover_cols = {c: True for c in [
-            "ticker", "revenue_yoy", "roe", "roa",
-            "net_margin", "op_margin", "latest_close", "market_cap",
-        ] if c in df_bubble.columns}
-        hover_cols["_bubble"] = False
+        # ── 호버 컬러코딩 헬퍼 ──
+        def fmt_metric(val, g_min, r_max, suffix="%"):
+            """g_min 이상 → 녹색, r_max 이하 → 적색, 그 외 → 기본색"""
+            if pd.isna(val):
+                return "N/A"
+            s = f"{val:.1f}{suffix}"
+            if val >= g_min:
+                return f'<span style="color:#22c55e"><b>{s}</b></span>'
+            elif val <= r_max:
+                return f'<span style="color:#ef4444"><b>{s}</b></span>'
+            return s
+
+        df_bubble["_hc_eps"] = df_bubble["eps_yoy"].apply(lambda v: fmt_metric(v, 20,  0))
+        df_bubble["_hc_rev"] = df_bubble["revenue_yoy"].apply(lambda v: fmt_metric(v, 20, 0))
+        df_bubble["_hc_roe"] = df_bubble["roe"].apply(lambda v: fmt_metric(v, 10,  0))
+        df_bubble["_hc_roa"] = (df_bubble["roa"].apply(lambda v: fmt_metric(v,  0,  0))
+                                if "roa" in df_bubble.columns else "N/A")
+        df_bubble["_hc_nm"]  = (df_bubble["net_margin"].apply(lambda v: fmt_metric(v, 10, 0))
+                                if "net_margin" in df_bubble.columns else "N/A")
+        df_bubble["_hc_om"]  = (df_bubble["op_margin"].apply(lambda v: fmt_metric(v, 10, 0))
+                                if "op_margin" in df_bubble.columns else "N/A")
+        df_bubble["_hc_close"]  = df_bubble["latest_close"].apply(
+            lambda v: f"₩{v:,.0f}" if pd.notna(v) else "N/A")
+        df_bubble["_hc_mktcap"] = df_bubble["market_cap"].apply(
+            lambda v: f"{v:,.0f}억" if pd.notna(v) else "N/A")
+
+        custom_cols = ["ticker","_hc_close","_hc_mktcap",
+                       "_hc_eps","_hc_rev","_hc_roe","_hc_roa","_hc_nm","_hc_om"]
+        hovertemplate = (
+            "<b>%{hovertext}</b>  "
+            "<span style='color:gray;font-size:11px'>%{customdata[0]}</span><br>"
+            "현재가: %{customdata[1]}  |  시총: %{customdata[2]}<br>"
+            "<br>"
+            "EPS YoY: %{customdata[3]}<br>"
+            "매출 YoY: %{customdata[4]}<br>"
+            "ROE: %{customdata[5]}  |  ROA: %{customdata[6]}<br>"
+            "순이익률: %{customdata[7]}  |  영업이익률: %{customdata[8]}<br>"
+            "<extra></extra>"
+        )
 
         fig_sc = px.scatter(
             df_bubble,
@@ -367,34 +398,24 @@ with tab_screener:
             size="_bubble", size_max=30,
             color="market",
             color_discrete_map={"KOSPI": "#003A70", "KOSDAQ": "#16a34a"},
-            hover_name="name", hover_data=hover_cols,
-            labels={
-                "rs_rating": "RS Rating", "eps_yoy": "EPS YoY (%)",
-                "revenue_yoy": "매출 YoY (%)", "roe": "ROE (%)",
-                "roa": "ROA (%)", "net_margin": "순이익률 (%)",
-                "op_margin": "영업이익률 (%)", "latest_close": "현재가 (₩)",
-                "market_cap": "시가총액 (억)", "market": "시장", "ticker": "종목코드",
-            },
+            hover_name="name",
+            custom_data=custom_cols,
             title=f"RS Rating × EPS YoY — RS 상위 200종목 ({selected_date})",
         )
-        # cliponaxis=False: 버블이 축 경계에서 잘리지 않도록
-        fig_sc.update_traces(cliponaxis=False)
+        fig_sc.update_traces(cliponaxis=False, hovertemplate=hovertemplate)
 
-        # ── 축 범위: 중심점(RS=85, EPS=10%) 항상 정중앙 + 데이터 극단값 기반 대칭 전개 ──
-        X_CENTER, Y_CENTER = 85, 10
-
+        # ── 축 범위 ──
+        Y_CENTER = 10
         x_vals = df_bubble["rs_rating"].dropna()
         y_vals = df_bubble["eps_yoy"].dropna().clip(-200, 500)
 
-        # X축: 85~99 고정 (RS 상위 종목 집중 표시), 버블 여백으로 양쪽 소폭 확장
-        x_min  = 83
-        x_max  = 101
+        # X축: 데이터 극단값 기반 (최솟값 ~ 100), 버블 여백 추가
+        x_pad = max((100 - float(x_vals.min())) * 0.05, 1)
+        x_min = float(x_vals.min()) - x_pad
+        x_max = 100 + x_pad
 
-        # Y축: max/min 모두 데이터 극단값
-        #   → 중심(10%)에서 상/하 중 더 먼 거리로 대칭
-        y_dist = max(float(y_vals.max()) - Y_CENTER,   # 위쪽: data max까지 거리
-                     Y_CENTER - float(y_vals.min()))    # 아래쪽: data min까지 거리
-        y_dist = max(y_dist, 30)                        # 최소 범위 보장
+        # Y축: EPS=10% 정중앙 고정, 데이터 극단값 기준 대칭
+        y_dist = max(float(y_vals.max()) - Y_CENTER, Y_CENTER - float(y_vals.min()), 30)
         y_pad  = max(y_dist * 0.10, 15)
         y_min  = Y_CENTER - y_dist - y_pad
         y_max  = Y_CENTER + y_dist + y_pad

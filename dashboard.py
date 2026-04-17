@@ -54,15 +54,24 @@ st.title("📊 KR RS Rating Screener")
 
 DB_PATH = "quant_dashboard.db"
 
-# ── 워치리스트 전용 영구 DB 경로 ──
-# Streamlit Cloud: /mount/data/ 는 재시작/재배포 후에도 보존되는 영구 스토리지
-# 로컬 개발: 프로젝트 폴더의 watchlist.db 사용
-if os.path.isdir("/mount/src"):           # Streamlit Cloud 환경 감지
-    _WL_DIR = "/mount/data"
-    os.makedirs(_WL_DIR, exist_ok=True)
-    WL_DB_PATH = os.path.join(_WL_DIR, "watchlist.db")
-else:
-    WL_DB_PATH = "watchlist.db"           # 로컬: 별도 파일로 분리
+# ── 워치리스트 DB 경로 ──
+# CWD(현재 디렉토리)에 쓰기 가능하면 watchlist.db 사용,
+# 권한 문제 발생 시 /tmp/로 자동 폴백 (항상 쓰기 가능)
+def _resolve_wl_path():
+    for candidate in ["watchlist.db", "/tmp/watchlist.db"]:
+        try:
+            import tempfile, sqlite3 as _sq
+            _c = _sq.connect(candidate)
+            _c.execute("CREATE TABLE IF NOT EXISTS _ping (x INTEGER)")
+            _c.execute("DROP TABLE IF EXISTS _ping")
+            _c.commit()
+            _c.close()
+            return candidate
+        except Exception:
+            continue
+    return "/tmp/watchlist.db"
+
+WL_DB_PATH = _resolve_wl_path()
 
 # ==========================================
 # 데이터 로드 함수

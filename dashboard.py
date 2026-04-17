@@ -474,12 +474,31 @@ with tab_screener:
         _, col_sc, _ = st.columns([1, 3, 1])
         with col_sc:
             st.markdown('<div class="scatter-col"></div>', unsafe_allow_html=True)
-            st.plotly_chart(fig_sc, use_container_width=True)
+            sc_event = st.plotly_chart(
+                fig_sc, use_container_width=True,
+                on_select="rerun", key="scatter_chart",
+            )
 
         st.caption(
             "💡 버블 크기 = 시가총액 | 🔵 KOSPI  🟢 KOSDAQ | "
             "오른쪽 위 사분면(RS≥90 & EPS YoY≥20%)이 핵심 후보군"
         )
+
+        # ── 버블 클릭 → 워치리스트 추가 ──
+        pts = getattr(getattr(sc_event, "selection", None), "points", [])
+        if pts:
+            cd = pts[0].get("customdata", [])
+            clicked_ticker = cd[0] if cd else None
+            if clicked_ticker:
+                clicked_name = ticker_name_map.get(clicked_ticker, clicked_ticker)
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.info(f"🖱️ 선택: **{clicked_name}**", icon="📌")
+                with col_btn:
+                    if st.button("⭐ 워치리스트 추가", key="scatter_wl_add"):
+                        add_to_watchlist(clicked_ticker, db_name=DB_PATH)
+                        st.success(f"✅ {clicked_ticker} 추가됨!")
+                        st.rerun()
     else:
         st.info("펀더멘탈 데이터 수집 완료 후 산점도가 활성화됩니다.")
 
@@ -794,92 +813,158 @@ with tab_watchlist:
 
     wl_list = get_watchlist(DB_PATH)
 
+    # ── 종목 추가/제거 컨트롤 ──
+    ctrl_add, ctrl_rm = st.columns(2)
+    with ctrl_add:
+        with st.expander("➕ 종목 추가"):
+            add_ticker = st.selectbox(
+                "추가할 종목",
+                options=[""] + sorted(df["ticker"].unique().tolist()),
+                format_func=lambda x: "선택하세요" if not x else ticker_name_map.get(x, x),
+                key="wl_add_sel",
+            )
+            if add_ticker and st.button("⭐ 추가", key="wl_add_btn"):
+                add_to_watchlist(add_ticker, db_name=DB_PATH)
+                st.success(f"✅ {ticker_name_map.get(add_ticker, add_ticker)} 추가됨")
+                st.rerun()
+    with ctrl_rm:
+        if wl_list:
+            with st.expander("🗑️ 종목 제거"):
+                rm_ticker = st.selectbox(
+                    "제거할 종목",
+                    options=[""] + [w["ticker"] for w in wl_list],
+                    format_func=lambda x: "선택" if not x else ticker_name_map.get(x, x),
+                    key="wl_rm_sel",
+                )
+                if rm_ticker and st.button("🗑️ 제거", key="wl_rm_btn"):
+                    remove_from_watchlist(rm_ticker, DB_PATH)
+                    st.success(f"{rm_ticker} 제거됨")
+                    st.rerun()
+
+    st.markdown("---")
+
     if not wl_list:
         st.info(
             "워치리스트가 비어 있습니다.  \n"
-            "스크리너 탭 하단의 **종목 상세 분석** 패널에서 추가하거나, "
-            "아래 추가 섹션을 이용하세요."
+            "산점도 버블 클릭 또는 위 ➕ 버튼으로 종목을 추가하세요."
         )
     else:
-        wl_tickers = [w["ticker"] for w in wl_list]
-        dates_sorted = sorted(df["date"].unique())
-        latest_rs_date = dates_sorted[-1] if dates_sorted else None
-        prev_date      = dates_sorted[-2] if len(dates_sorted) >= 2 else None
+        wl_tickers    = [w["ticker"] for w in wl_list]
+        dates_sorted  = sorted(df["date"].unique())
+        latest_date   = dates_sorted[-1] if dates_sorted else None
 
-        df_today_all = df[df["date"] == latest_rs_date] if latest_rs_date else pd.DataFrame()
-        df_prev_all  = df[df["date"] == prev_date][["ticker", "rs_rating"]].rename(
-            columns={"rs_rating": "rs_prev"}
-        ) if prev_date else pd.DataFrame(columns=["ticker", "rs_prev"])
+        # 최근 10 거래일
+        recent_dates  = dates_sorted[-10:] if len(dates_sorted) >= 10 else dates_sorted
 
-        rows = []
+        # 워치리스트 티커별 RS 히스토리 (최근 10일)
+        conn_wl = sqlite3.connect(DB_PATH)
+        tickers_sql = ",".join([f"'{t}'" for t in wl_tickers])
+        dates_sql   = ",".join([f"'{d}'" for d in recent_dates])
+        df_rs_hist  = pd.read_sql(f"""
+            SELECT ticker, date, rs_rating
+            FROM rs_ratings
+            WHERE ticker IN ({tickers_sql}) AND date IN ({dates_sql})
+        """, conn_wl)
+
+        # 등록일 기준 RS (등록일 이후 첫 거래일)
+        def rs_at_added(ticker, added_date):
+            r = pd.read_sql(f"""
+                SELECT rs_rating FROM rs_ratings
+                WHERE ticker='{ticker}' AND date >= '{added_date}'
+                ORDER BY date ASC LIMIT 1
+            """, conn_wl)
+            if r.empty:
+                r = pd.read_sql(f"""
+                    SELECT rs_rating FROM rs_ratings
+                    WHERE ticker='{ticker}' AND date <= '{added_date}'
+                    ORDER BY date DESC LIMIT 1
+                """, conn_wl)
+            return float(r["rs_rating"].iloc[0]) if not r.empty else None
+        conn_wl.close()
+
+        # ── Daily RS Board HTML 생성 ──
+        def rs_cell(val):
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return "<td style='background:#374151;color:#9ca3af;text-align:center;padding:4px 6px'>—</td>"
+            v = int(val)
+            if v >= 95:
+                bg, fg = "#16a34a", "white"
+            elif v >= 90:
+                bg, fg = "#ca8a04", "white"
+            elif v >= 80:
+                bg, fg = "#f3f4f6", "#1f2937"
+            else:
+                bg, fg = "#dc2626", "white"
+            return f"<td style='background:{bg};color:{fg};text-align:center;padding:4px 6px;font-weight:bold'>{v}</td>"
+
+        def delta_cell(delta):
+            if delta is None or (isinstance(delta, float) and pd.isna(delta)):
+                return "<td style='text-align:center;padding:4px 6px'>—</td>"
+            sign  = "+" if delta >= 0 else ""
+            color = "#16a34a" if delta > 0 else ("#dc2626" if delta < 0 else "#6b7280")
+            return f"<td style='color:{color};text-align:center;padding:4px 6px;font-weight:bold'>{sign}{int(delta)}</td>"
+
+        date_headers = "".join(
+            f"<th style='text-align:center;padding:4px 8px;font-size:11px'>{d[5:]}</th>"
+            for d in recent_dates
+        )
+        header = (
+            "<tr style='background:#1e3a5f;color:white'>"
+            "<th style='padding:6px 10px;min-width:90px'>종목명</th>"
+            "<th style='padding:6px 8px;min-width:70px'>추가일</th>"
+            "<th style='padding:6px 8px;text-align:center'>현재RS</th>"
+            "<th style='padding:6px 8px;text-align:center'>등록후변화</th>"
+            + date_headers +
+            "</tr>"
+        )
+
+        df_today = df[df["date"] == latest_date] if latest_date else pd.DataFrame()
+        rows_html = []
         for w in wl_list:
-            t = w["ticker"]
-            today_r = df_today_all[df_today_all["ticker"] == t]
-            prev_r  = df_prev_all[df_prev_all["ticker"] == t]
+            t         = w["ticker"]
+            added     = w["added_date"]
+            name      = ticker_name_map.get(t, t).split("—")[-1].strip() if "—" in ticker_name_map.get(t, t) else t
+            today_row = df_today[df_today["ticker"] == t]
+            rs_now    = float(today_row["rs_rating"].values[0]) if not today_row.empty else None
+            rs_reg    = rs_at_added(t, added)
+            delta     = round(rs_now - rs_reg, 0) if rs_now is not None and rs_reg is not None else None
 
-            rs_now  = float(today_r["rs_rating"].values[0]) if not today_r.empty else None
-            rs_prev = float(prev_r["rs_prev"].values[0])    if not prev_r.empty  else None
-            rs_chg  = round(rs_now - rs_prev, 0) if rs_now is not None and rs_prev is not None else None
+            rs_now_disp = f"<b>{int(rs_now)}</b>" if rs_now is not None else "—"
+            daily_cells = ""
+            for d in recent_dates:
+                row = df_rs_hist[(df_rs_hist["ticker"] == t) & (df_rs_hist["date"] == d)]
+                val = float(row["rs_rating"].values[0]) if not row.empty else None
+                daily_cells += rs_cell(val)
 
-            rows.append({
-                "종목코드":      t,
-                "종목명":        today_r["name"].values[0]         if not today_r.empty and "name" in today_r else "",
-                "시장":          today_r["market"].values[0]       if not today_r.empty and "market" in today_r else "",
-                "RS Rating":     rs_now,
-                "RS 변화 (1일)": rs_chg,
-                "현재가 (₩)":   int(today_r["latest_close"].values[0]) if not today_r.empty else None,
-                "시가총액 (억)": round(float(today_r["market_cap"].values[0]), 0) if not today_r.empty and pd.notna(today_r["market_cap"].values[0]) else None,
-                "추가일":        w["added_date"],
-            })
-
-        df_wl = pd.DataFrame(rows)
-        st.dataframe(
-            df_wl,
-            use_container_width=True,
-            column_config={
-                "종목코드":      st.column_config.TextColumn(width="small"),
-                "종목명":        st.column_config.TextColumn(width="medium"),
-                "시장":          st.column_config.TextColumn(width="small"),
-                "RS Rating":     st.column_config.NumberColumn(format="%d"),
-                "RS 변화 (1일)": st.column_config.NumberColumn(format="%+.0f"),
-                "현재가 (₩)":   st.column_config.NumberColumn(format="%d"),
-                "시가총액 (억)": st.column_config.NumberColumn(format="%,.0f"),
-                "추가일":        st.column_config.TextColumn(width="small"),
-            },
-            hide_index=True,
-        )
-
-        st.markdown("**종목 제거**")
-        rm_col1, rm_col2 = st.columns([3, 1])
-        with rm_col1:
-            rm_ticker = st.selectbox(
-                "제거할 종목", options=[""] + wl_tickers,
-                format_func=lambda x: "선택" if not x else ticker_name_map.get(x, x),
-                key="wl_rm_sel",
+            rows_html.append(
+                "<tr style='border-bottom:1px solid #374151'>"
+                f"<td style='padding:5px 10px;font-weight:500'>{name}</td>"
+                f"<td style='padding:5px 8px;color:#9ca3af;font-size:12px'>{added}</td>"
+                f"<td style='text-align:center;padding:5px 8px'>{rs_now_disp}</td>"
+                + delta_cell(delta)
+                + daily_cells
+                + "</tr>"
             )
-        with rm_col2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if rm_ticker and st.button("🗑️ 제거", key="wl_rm_btn"):
-                remove_from_watchlist(rm_ticker, DB_PATH)
-                st.success(f"{rm_ticker} 제거됨")
-                st.rerun()
 
-    st.markdown("---")
-    st.markdown("**종목 추가**")
-    add_col1, add_col2 = st.columns([3, 1])
-    with add_col1:
-        add_ticker = st.selectbox(
-            "추가할 종목 (전체 유니버스)",
-            options=[""] + sorted(df["ticker"].unique().tolist()),
-            format_func=lambda x: "선택하세요" if not x else ticker_name_map.get(x, x),
-            key="wl_add_sel",
+        legend = (
+            "<div style='margin-top:8px;font-size:12px;color:#9ca3af'>"
+            "<span style='background:#16a34a;color:white;padding:2px 8px;border-radius:3px;margin-right:6px'>RS≥95</span>"
+            "<span style='background:#ca8a04;color:white;padding:2px 8px;border-radius:3px;margin-right:6px'>90~94</span>"
+            "<span style='background:#f3f4f6;color:#1f2937;padding:2px 8px;border-radius:3px;margin-right:6px'>80~89</span>"
+            "<span style='background:#dc2626;color:white;padding:2px 8px;border-radius:3px'>RS&lt;80</span>"
+            "</div>"
         )
-    with add_col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if add_ticker and st.button("⭐ 추가", key="wl_add_btn"):
-            add_to_watchlist(add_ticker, db_name=DB_PATH)
-            st.success(f"{add_ticker} 추가됨")
-            st.rerun()
+
+        table_html = (
+            "<div style='overflow-x:auto'>"
+            "<table style='border-collapse:collapse;width:100%;font-size:13px'>"
+            f"<thead>{header}</thead>"
+            f"<tbody>{''.join(rows_html)}</tbody>"
+            "</table>"
+            "</div>"
+            + legend
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
 
 
 # ==========================================

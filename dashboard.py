@@ -497,12 +497,45 @@ with tab_screener:
             bgcolor="rgba(255,255,255,0.85)", bordercolor="#dc2626", borderwidth=1,
         )
 
-        # ── 산점도: 전체 너비, 16:9 고정 높이 ──
-        # 1440px 기준 컨텐츠 너비 ≈ 1100px → 16:9 높이 ≈ 619px
-        # 여기서 KPI(~150) + 탭(~40) + 캡션(~30) + expander(~40) = ~260px 여유
-        # → 뷰포트 900px 기준 차트 최대 640px 이하로 제한
+        # ── 산점도: JS로 뷰포트 높이 측정 후 Plotly 높이 동적 적용 ──
+        # 비차단(non-blocking) iframe → parent window Plotly.relayout 호출
+        components.html("""
+<script>
+(function() {
+    var OFFSET = 380; // 차트 외 요소 합계(KPI+탭+헤더+캡션+expander+여유)
+    var MIN_H  = 300;
+
+    function applyHeight() {
+        try {
+            var p   = window.parent;
+            var vh  = p.innerHeight;
+            var h   = Math.max(MIN_H, vh - OFFSET);
+
+            // key="scatter_chart" → id에 "scatter_chart" 포함된 div 찾기
+            var divs = p.document.querySelectorAll('[data-testid="stPlotlyChart"] .js-plotly-plot');
+            if (!divs.length) { setTimeout(applyHeight, 200); return; }
+
+            divs.forEach(function(d) {
+                // Plotly 전역이 없으면 div 인라인 스타일만 조정
+                try { p.Plotly.relayout(d, {height: h}); }
+                catch(e) { d.style.height = h + 'px'; }
+            });
+
+            // 창 크기 바뀔 때 재적용
+            p.removeEventListener('resize', applyHeight);
+            p.addEventListener('resize', applyHeight);
+        } catch(e) { setTimeout(applyHeight, 300); }
+    }
+
+    // Streamlit 렌더링 완료 대기
+    setTimeout(applyHeight, 600);
+})();
+</script>
+""", height=0)
+
+        # Python 기본값 (JS 로드 전 초기 렌더): 뷰포트 모름 → 안전값 600
         fig_sc.update_layout(
-            height=580,
+            height=600,
             plot_bgcolor="#f8fafc", paper_bgcolor="white",
             legend=dict(orientation="h", y=-0.06),
             margin=dict(t=40, b=40, l=60, r=40),

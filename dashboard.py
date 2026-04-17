@@ -346,12 +346,11 @@ with tab_screener:
             .nlargest(200, "rs_rating")
             .copy()
         )
-        # 시가총액 로그 스케일 → [1, 100] 정규화
-        # 극단값(삼성전자 등)이 있어도 전 종목 버블 크기가 가시적으로 분포
+        # 시가총액 로그 스케일 → [3, 50] 정규화 (이전 대비 1/2 축소)
         mc = df_bubble["market_cap"].fillna(df_bubble["market_cap"].median()).clip(lower=1)
         log_mc = np.log10(mc)
         lo, hi = log_mc.min(), log_mc.max()
-        df_bubble["_bubble"] = ((log_mc - lo) / (hi - lo) * 90 + 10) if hi > lo else 50
+        df_bubble["_bubble"] = ((log_mc - lo) / (hi - lo) * 47 + 3) if hi > lo else 25
         for col in ["eps_yoy", "revenue_yoy", "roe", "roa", "net_margin", "op_margin"]:
             if col in df_bubble.columns:
                 df_bubble[col] = df_bubble[col].round(1)
@@ -365,7 +364,7 @@ with tab_screener:
         fig_sc = px.scatter(
             df_bubble,
             x="rs_rating", y="eps_yoy",
-            size="_bubble", size_max=60,
+            size="_bubble", size_max=30,
             color="market",
             color_discrete_map={"KOSPI": "#003A70", "KOSDAQ": "#16a34a"},
             hover_name="name", hover_data=hover_cols,
@@ -387,13 +386,9 @@ with tab_screener:
         x_vals = df_bubble["rs_rating"].dropna()
         y_vals = df_bubble["eps_yoy"].dropna().clip(-200, 500)
 
-        # X축: 오른쪽은 RS 최대값 99 고정, 왼쪽은 데이터 최솟값
-        #   → 중심(85)에서 좌/우 중 더 먼 거리로 대칭
-        x_dist = max(99 - X_CENTER,               # 오른쪽: 99까지 14pt
-                     X_CENTER - float(x_vals.min()))  # 왼쪽:  data min까지 거리
-        x_pad  = max(x_dist * 0.08, 3)
-        x_min  = X_CENTER - x_dist - x_pad
-        x_max  = X_CENTER + x_dist + x_pad   # 99 초과 가능(대칭 유지)
+        # X축: 85~99 고정 (RS 상위 종목 집중 표시), 버블 여백으로 양쪽 소폭 확장
+        x_min  = 83
+        x_max  = 101
 
         # Y축: max/min 모두 데이터 극단값
         #   → 중심(10%)에서 상/하 중 더 먼 거리로 대칭

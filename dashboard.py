@@ -20,6 +20,36 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
+
+# ── 스크롤 제거 & 레이아웃 정리 CSS ──
+st.markdown("""
+<style>
+/* 상단 패딩 축소 */
+.main .block-container {
+    padding-top: 1rem;
+    padding-bottom: 0rem;
+}
+/* Streamlit 기본 푸터 숨김 */
+footer { visibility: hidden; height: 0; }
+/* 상단 헤더바 숨김 */
+header[data-testid="stHeader"] { height: 0; }
+/* 전체 페이지 스크롤 제거 */
+html, body {
+    overflow: hidden !important;
+    height: 100% !important;
+}
+/* 메인 컨테이너 내부만 스크롤 허용 */
+[data-testid="stAppViewContainer"] {
+    overflow: hidden !important;
+    height: 100vh !important;
+}
+section[data-testid="stMain"] {
+    overflow-y: auto;
+    height: 100vh;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("📊 KR RS Rating Screener")
 
 DB_PATH = "quant_dashboard.db"

@@ -1075,37 +1075,34 @@ with tab_market:
 with tab_watchlist:
     st.subheader("⭐ 워치리스트")
 
-    wl_list = wl_get()
-
-    # ── 종목 추가/제거 컨트롤 ──
-    ctrl_add, ctrl_rm = st.columns(2)
-    with ctrl_add:
-        with st.expander("➕ 종목 추가"):
-            add_ticker = st.selectbox(
-                "추가할 종목",
-                options=[""] + sorted(df["ticker"].unique().tolist()),
-                format_func=lambda x: "선택하세요" if not x else ticker_name_map.get(x, x),
-                key="wl_add_sel",
-            )
-            if add_ticker and st.button("⭐ 추가", key="wl_add_btn"):
-                wl_add(add_ticker)
-                st.success(f"✅ {ticker_name_map.get(add_ticker, add_ticker)} 추가됨")
-                st.rerun()
-    with ctrl_rm:
-        if wl_list:
-            with st.expander("🗑️ 종목 제거"):
-                rm_ticker = st.selectbox(
-                    "제거할 종목",
-                    options=[""] + [w["ticker"] for w in wl_list],
-                    format_func=lambda x: "선택" if not x else ticker_name_map.get(x, x),
-                    key="wl_rm_sel",
+    # ── 종목 추가: 종목명 검색 ──
+    with st.expander("➕ 종목 추가", expanded=False):
+        search_query = st.text_input(
+            "종목명 검색", placeholder="예: 삼성전자, 에코프로", key="wl_search_input"
+        )
+        if search_query:
+            matched = [
+                t for t, label in ticker_name_map.items()
+                if search_query.replace(" ", "").lower()
+                   in label.replace(" ", "").lower()
+            ]
+            if matched:
+                add_ticker = st.selectbox(
+                    "종목 선택",
+                    options=matched,
+                    format_func=lambda x: ticker_name_map.get(x, x),
+                    key="wl_add_sel",
                 )
-                if rm_ticker and st.button("🗑️ 제거", key="wl_rm_btn"):
-                    wl_remove(rm_ticker)
-                    st.success(f"{rm_ticker} 제거됨")
+                if st.button("⭐ 워치리스트에 추가", key="wl_add_btn", use_container_width=True):
+                    wl_add(add_ticker)
+                    st.success(f"✅ {ticker_name_map.get(add_ticker, add_ticker)} 추가됨")
                     st.rerun()
+            else:
+                st.caption("검색 결과가 없습니다.")
 
     st.markdown("---")
+
+    wl_list = wl_get()
 
     if not wl_list:
         st.info(
@@ -1113,6 +1110,29 @@ with tab_watchlist:
             "산점도 버블 클릭 또는 위 ➕ 버튼으로 종목을 추가하세요."
         )
     else:
+        # ── 종목명 클릭 → 우측 삭제 버튼 ──
+        for w in wl_list:
+            t          = w["ticker"]
+            added      = w["added_date"]
+            label      = ticker_name_map.get(t, t)
+            name_short = label.split("—")[-1].strip() if "—" in label else t
+            is_sel     = st.session_state.get("wl_selected") == t
+
+            col_name, col_del = st.columns([5, 1])
+            with col_name:
+                btn_label = f"{'▶ ' if is_sel else ''}{name_short}  ·  {t}  ({added})"
+                if st.button(btn_label, key=f"wl_name_{t}", use_container_width=True):
+                    st.session_state["wl_selected"] = None if is_sel else t
+                    st.rerun()
+            with col_del:
+                if is_sel:
+                    if st.button("🗑️ 제거", key=f"wl_del_{t}", type="primary", use_container_width=True):
+                        wl_remove(t)
+                        st.session_state["wl_selected"] = None
+                        st.rerun()
+
+        st.markdown("---")
+
         wl_tickers    = [w["ticker"] for w in wl_list]
         dates_sorted  = sorted(df["date"].unique())
         latest_date   = dates_sorted[-1] if dates_sorted else None

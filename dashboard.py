@@ -260,6 +260,80 @@ ticker_name_map = {
 }
 
 # ==========================================
+# 사이드바 필터 (fragment 밖 — top-level)
+# ==========================================
+st.sidebar.header("🔍 필터 설정")
+
+available_dates = sorted(df["date"].unique(), reverse=True)
+selected_date   = st.sidebar.selectbox("📅 기준일", available_dates)
+market_options  = ["전체", "KOSPI", "KOSDAQ"]
+selected_market = st.sidebar.selectbox("🏛️ 시장", market_options)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("RS Rating 범위")
+rs_min, rs_max = st.sidebar.slider("IBD RS Rating", 1, 99, (1, 99))
+
+with st.sidebar.expander("📐 개별 기간 RS 필터"):
+    rs_1m_min  = st.slider("RS 1M 최소",  1, 99, 1)
+    rs_3m_min  = st.slider("RS 3M 최소",  1, 99, 1)
+    rs_6m_min  = st.slider("RS 6M 최소",  1, 99, 1)
+    rs_12m_min = st.slider("RS 12M 최소", 1, 99, 1)
+
+if has_fundamentals:
+    with st.sidebar.expander("📈 펀더멘탈 필터"):
+        eps_yoy_min     = st.number_input("EPS YoY 최소 (%)",    value=-9999,   step=5)
+        revenue_yoy_min = st.number_input("매출 YoY 최소 (%)",   value=-9999,   step=5)
+        roe_min_f       = st.number_input("ROE 최소 (%)",         value=-9999.0, step=1.0)
+        op_margin_min   = st.number_input("영업이익률 최소 (%)", value=-9999.0, step=1.0)
+else:
+    eps_yoy_min = revenue_yoy_min = roe_min_f = op_margin_min = -9999
+
+st.sidebar.markdown("---")
+with st.sidebar.expander("📈 신고가 근접 필터"):
+    near_high_pct = st.slider(
+        "52주 고가 대비 하락폭 허용 (%)",
+        min_value=-50, max_value=0, value=-100, step=1,
+        help="예: -5 → 52주 고가의 95% 이상인 종목만 표시 / -100 → 필터 비활성",
+    )
+
+st.sidebar.markdown("---")
+price_min    = st.sidebar.number_input("💰 최소 종가", value=0, step=1000)
+price_max    = st.sidebar.number_input("💰 최대 종가 (0=무제한)", value=0, step=10000)
+st.sidebar.markdown("---")
+search_query = st.sidebar.text_input("🔎 종목명/코드 검색")
+
+# ── 신규 보고서 알림 ──
+if all_reports:
+    latest_report_date    = all_reports[0]["report_date"]
+    latest_report_tickers = [r["ticker"] for r in all_reports
+                              if r["report_date"] == latest_report_date]
+    if latest_report_tickers:
+        st.sidebar.markdown("---")
+        st.sidebar.info(
+            f"📄 **{latest_report_date}** 신규 보고서\n\n"
+            f"{', '.join(latest_report_tickers)}",
+            icon="🆕",
+        )
+
+# ── 1W RS 급등 종목 알림 ──
+if not df_surge.empty:
+    st.sidebar.markdown("---")
+    with st.sidebar.expander(
+        f"🚀 RS 급등 {len(df_surge)}개 (10pt↑)", expanded=False
+    ):
+        surge_display = df_surge.merge(
+            df_universe[["ticker","name","market"]], on="ticker", how="left"
+        )[["ticker","name","rs_delta","ret_1w"]]
+        surge_display.columns = ["코드","종목명","RS변화","1W수익률(%)"]
+        st.dataframe(
+            surge_display.style.background_gradient(
+                subset=["RS변화"], cmap="Greens"
+            ).format({"RS변화": "+{:.0f}", "1W수익률(%)": "{:.1f}%"}),
+            use_container_width=True, hide_index=True,
+        )
+
+
+# ==========================================
 # 탭 구성
 # ==========================================
 tab_screener, tab_market, tab_watchlist, tab_reports = st.tabs([
@@ -272,47 +346,7 @@ tab_screener, tab_market, tab_watchlist, tab_reports = st.tabs([
 # ==========================================
 @st.fragment
 def render_screener():
-
-    # ── 사이드바 필터 ──
-    st.sidebar.header("🔍 필터 설정")
-
-    available_dates = sorted(df["date"].unique(), reverse=True)
-    selected_date   = st.sidebar.selectbox("📅 기준일", available_dates)
-    market_options  = ["전체", "KOSPI", "KOSDAQ"]
-    selected_market = st.sidebar.selectbox("🏛️ 시장", market_options)
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("RS Rating 범위")
-    rs_min, rs_max = st.sidebar.slider("IBD RS Rating", 1, 99, (1, 99))
-
-    with st.sidebar.expander("📐 개별 기간 RS 필터"):
-        rs_1m_min  = st.slider("RS 1M 최소",  1, 99, 1)
-        rs_3m_min  = st.slider("RS 3M 최소",  1, 99, 1)
-        rs_6m_min  = st.slider("RS 6M 최소",  1, 99, 1)
-        rs_12m_min = st.slider("RS 12M 최소", 1, 99, 1)
-
-    if has_fundamentals:
-        with st.sidebar.expander("📈 펀더멘탈 필터"):
-            eps_yoy_min     = st.number_input("EPS YoY 최소 (%)",    value=-9999,   step=5)
-            revenue_yoy_min = st.number_input("매출 YoY 최소 (%)",   value=-9999,   step=5)
-            roe_min_f       = st.number_input("ROE 최소 (%)",         value=-9999.0, step=1.0)
-            op_margin_min   = st.number_input("영업이익률 최소 (%)", value=-9999.0, step=1.0)
-
-    st.sidebar.markdown("---")
-    with st.sidebar.expander("📈 신고가 근접 필터"):
-        near_high_pct = st.slider(
-            "52주 고가 대비 하락폭 허용 (%)",
-            min_value=-50, max_value=0, value=-100, step=1,
-            help="예: -5 → 52주 고가의 95% 이상인 종목만 표시 / -100 → 필터 비활성",
-        )
-
-    st.sidebar.markdown("---")
-    price_min    = st.sidebar.number_input("💰 최소 종가", value=0, step=1000)
-    price_max    = st.sidebar.number_input("💰 최대 종가 (0=무제한)", value=0, step=10000)
-    st.sidebar.markdown("---")
-    search_query = st.sidebar.text_input("🔎 종목명/코드 검색")
-
-    # ── 필터 적용 ──
+    # ── 필터 적용 (사이드바 변수는 top-level 클로저로 참조) ──
     filtered = df[df["date"] == selected_date].copy()
     if selected_market != "전체":
         filtered = filtered[filtered["market"] == selected_market]
@@ -373,46 +407,6 @@ def render_screener():
         ]
     display_cols = [c for c in display_cols if c in filtered.columns]
     df_display   = filtered[display_cols].reset_index(drop=True)
-
-    # ── 요약 지표 → 사이드바 하단 ──
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**📊 현재 필터 결과**")
-    st.sidebar.metric("📅 기준일",     selected_date)
-    st.sidebar.metric("📋 필터 결과",  f"{len(df_display)}개")
-    st.sidebar.metric("전체 종목",     f"{len(df[df['date'] == selected_date])}개")
-    st.sidebar.metric("📄 보고서 보유",
-                      f"{(df_display['has_report'] != '').sum()}개"
-                      if "has_report" in df_display.columns else "0개")
-
-    # ── 신규 보고서 알림 → 사이드바 ──
-    if all_reports:
-        latest_report_date    = all_reports[0]["report_date"]
-        latest_report_tickers = [r["ticker"] for r in all_reports
-                                  if r["report_date"] == latest_report_date]
-        if latest_report_tickers:
-            st.sidebar.markdown("---")
-            st.sidebar.info(
-                f"📄 **{latest_report_date}** 신규 보고서\n\n"
-                f"{', '.join(latest_report_tickers)}",
-                icon="🆕",
-            )
-
-    # ── 1W RS 급등 종목 알림 → 사이드바 ──
-    if not df_surge.empty:
-        st.sidebar.markdown("---")
-        with st.sidebar.expander(
-            f"🚀 RS 급등 {len(df_surge)}개 (10pt↑)", expanded=False
-        ):
-            surge_display = df_surge.merge(
-                df_universe[["ticker","name","market"]], on="ticker", how="left"
-            )[["ticker","name","rs_delta","ret_1w"]]
-            surge_display.columns = ["코드","종목명","RS변화","1W수익률(%)"]
-            st.dataframe(
-                surge_display.style.background_gradient(
-                    subset=["RS변화"], cmap="Greens"
-                ).format({"RS변화": "+{:.0f}", "1W수익률(%)": "{:.1f}%"}),
-                use_container_width=True, hide_index=True,
-            )
 
     # ── RS × 펀더멘탈 산점도 (라벨 제거 → 차트 타이틀로 통합) ──
     if has_fundamentals:

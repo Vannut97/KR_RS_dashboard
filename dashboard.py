@@ -1080,24 +1080,38 @@ with tab_watchlist:
     if not wl_list:
         st.info("워치리스트가 비어 있습니다.  \n산점도 버블 클릭으로 종목을 추가하세요.")
     else:
-        wl_tickers    = [w["ticker"] for w in wl_list]
-        dates_sorted  = sorted(df["date"].unique())
-        latest_date   = dates_sorted[-1] if dates_sorted else None
+        wl_tickers   = [w["ticker"] for w in wl_list]
+        dates_sorted = sorted(df["date"].unique())
+        latest_date  = dates_sorted[-1] if dates_sorted else None
+        recent_dates = dates_sorted[-10:] if len(dates_sorted) >= 10 else dates_sorted
 
-        # 최근 10 거래일
-        recent_dates  = dates_sorted[-10:] if len(dates_sorted) >= 10 else dates_sorted
+        # ── 버튼 행: 모두 선택 / 종목 삭제 ──
+        selected_tickers = [t for t in wl_tickers if st.session_state.get(f"wl_chk_{t}", False)]
+        btn_c1, btn_c2, _ = st.columns([1.3, 1.8, 7])
+        with btn_c1:
+            if st.button("☑️ 모두 선택", use_container_width=True):
+                for t in wl_tickers:
+                    st.session_state[f"wl_chk_{t}"] = True
+                st.rerun()
+        with btn_c2:
+            n_sel    = len(selected_tickers)
+            del_label = f"🗑️ 종목 삭제 ({n_sel})" if n_sel else "🗑️ 종목 삭제"
+            if st.button(del_label, type="primary",
+                         disabled=(n_sel == 0), use_container_width=True):
+                for t in selected_tickers:
+                    wl_remove(t)
+                    st.session_state.pop(f"wl_chk_{t}", None)
+                st.rerun()
 
-        # 워치리스트 티커별 RS 히스토리 (최근 10일)
-        conn_rs = sqlite3.connect(DB_PATH)
+        # ── RS 데이터 수집 ──
+        conn_rs     = sqlite3.connect(DB_PATH)
         tickers_sql = ",".join([f"'{t}'" for t in wl_tickers])
         dates_sql   = ",".join([f"'{d}'" for d in recent_dates])
         df_rs_hist  = pd.read_sql(f"""
-            SELECT ticker, date, rs_rating
-            FROM rs_ratings
+            SELECT ticker, date, rs_rating FROM rs_ratings
             WHERE ticker IN ({tickers_sql}) AND date IN ({dates_sql})
         """, conn_rs)
 
-        # 등록일 기준 RS (등록일 이후 첫 거래일)
         def rs_at_added(ticker, added_date):
             r = pd.read_sql(f"""
                 SELECT rs_rating FROM rs_ratings
@@ -1112,19 +1126,15 @@ with tab_watchlist:
                 """, conn_rs)
             return float(r["rs_rating"].iloc[0]) if not r.empty else None
 
-        # ── Daily RS Board HTML 생성 ──
+        # ── HTML 셀 헬퍼 ──
         def rs_cell(val):
             if val is None or (isinstance(val, float) and pd.isna(val)):
                 return "<td style='background:#374151;color:#9ca3af;text-align:center;padding:4px 6px'>—</td>"
             v = int(val)
-            if v >= 95:
-                bg, fg = "#16a34a", "white"
-            elif v >= 90:
-                bg, fg = "#ca8a04", "white"
-            elif v >= 80:
-                bg, fg = "#f3f4f6", "#1f2937"
-            else:
-                bg, fg = "#dc2626", "white"
+            if v >= 95:   bg, fg = "#16a34a", "white"
+            elif v >= 90: bg, fg = "#ca8a04", "white"
+            elif v >= 80: bg, fg = "#f3f4f6", "#1f2937"
+            else:         bg, fg = "#dc2626", "white"
             return f"<td style='background:{bg};color:{fg};text-align:center;padding:4px 6px;font-weight:bold'>{v}</td>"
 
         def delta_cell(delta):
@@ -1134,69 +1144,91 @@ with tab_watchlist:
             color = "#16a34a" if delta > 0 else ("#dc2626" if delta < 0 else "#6b7280")
             return f"<td style='color:{color};text-align:center;padding:4px 6px;font-weight:bold'>{sign}{int(delta)}</td>"
 
-        date_headers = "".join(
-            f"<th style='text-align:center;padding:4px 8px;font-size:11px'>{d[5:]}</th>"
-            for d in recent_dates
-        )
-        header = (
-            "<tr style='background:#1e3a5f;color:white'>"
-            "<th style='padding:6px 10px;min-width:90px'>종목명</th>"
-            "<th style='padding:6px 8px;min-width:70px'>추가일</th>"
-            "<th style='padding:6px 8px;text-align:center'>현재RS</th>"
-            "<th style='padding:6px 8px;text-align:center'>등록후변화</th>"
-            + date_headers +
-            "</tr>"
-        )
+        # ── 체크박스 컬럼 + 테이블 컬럼 ──
+        ROW_H   = 34   # px — HTML tr 높이와 맞춤
+        THEAD_H = 36   # px — thead 높이
 
-        df_today = df[df["date"] == latest_date] if latest_date else pd.DataFrame()
-        rows_html = []
-        for w in wl_list:
-            t         = w["ticker"]
-            added     = w["added_date"]
-            name      = ticker_name_map.get(t, t).split("—")[-1].strip() if "—" in ticker_name_map.get(t, t) else t
-            today_row = df_today[df_today["ticker"] == t]
-            rs_now    = float(today_row["rs_rating"].values[0]) if not today_row.empty else None
-            rs_reg    = rs_at_added(t, added)
-            delta     = round(rs_now - rs_reg, 0) if rs_now is not None and rs_reg is not None else None
+        col_chk, col_tbl = st.columns([0.35, 9.65])
 
-            rs_now_disp = f"<b>{int(rs_now)}</b>" if rs_now is not None else "—"
-            daily_cells = ""
-            for d in recent_dates:
-                row = df_rs_hist[(df_rs_hist["ticker"] == t) & (df_rs_hist["date"] == d)]
-                val = float(row["rs_rating"].values[0]) if not row.empty else None
-                daily_cells += rs_cell(val)
+        # 체크박스 열
+        with col_chk:
+            # thead 높이만큼 공백
+            st.markdown(
+                f"<div style='height:{THEAD_H + 8}px'></div>",
+                unsafe_allow_html=True,
+            )
+            df_today = df[df["date"] == latest_date] if latest_date else pd.DataFrame()
+            for w in wl_list:
+                t = w["ticker"]
+                st.checkbox(
+                    "", key=f"wl_chk_{t}",
+                    value=st.session_state.get(f"wl_chk_{t}", False),
+                )
+                # 체크박스와 tr 높이 보정
+                st.markdown(
+                    f"<div style='height:{ROW_H - 28}px'></div>",
+                    unsafe_allow_html=True,
+                )
 
-            rows_html.append(
-                "<tr style='border-bottom:1px solid #374151'>"
-                f"<td style='padding:5px 10px;font-weight:500'>{name}</td>"
-                f"<td style='padding:5px 8px;color:#9ca3af;font-size:12px'>{added}</td>"
-                f"<td style='text-align:center;padding:5px 8px'>{rs_now_disp}</td>"
-                + delta_cell(delta)
-                + daily_cells
-                + "</tr>"
+        # 테이블 열
+        with col_tbl:
+            date_headers = "".join(
+                f"<th style='text-align:center;padding:4px 8px;font-size:11px'>{d[5:]}</th>"
+                for d in recent_dates
+            )
+            header = (
+                "<tr style='background:#1e3a5f;color:white'>"
+                "<th style='padding:6px 10px;min-width:90px'>종목명</th>"
+                "<th style='padding:6px 8px;min-width:70px'>추가일</th>"
+                "<th style='padding:6px 8px;text-align:center'>현재RS</th>"
+                "<th style='padding:6px 8px;text-align:center'>등록후변화</th>"
+                + date_headers + "</tr>"
             )
 
-        conn_rs.close()   # 모든 쿼리가 끝난 뒤 연결 종료
+            rows_html = []
+            for w in wl_list:
+                t         = w["ticker"]
+                added     = w["added_date"]
+                name      = ticker_name_map.get(t, t).split("—")[-1].strip() \
+                            if "—" in ticker_name_map.get(t, t) else t
+                today_row = df_today[df_today["ticker"] == t]
+                rs_now    = float(today_row["rs_rating"].values[0]) if not today_row.empty else None
+                rs_reg    = rs_at_added(t, added)
+                delta     = round(rs_now - rs_reg, 0) if rs_now is not None and rs_reg is not None else None
+                rs_disp   = f"<b>{int(rs_now)}</b>" if rs_now is not None else "—"
 
-        legend = (
-            "<div style='margin-top:8px;font-size:12px;color:#9ca3af'>"
-            "<span style='background:#16a34a;color:white;padding:2px 8px;border-radius:3px;margin-right:6px'>RS≥95</span>"
-            "<span style='background:#ca8a04;color:white;padding:2px 8px;border-radius:3px;margin-right:6px'>90~94</span>"
-            "<span style='background:#f3f4f6;color:#1f2937;padding:2px 8px;border-radius:3px;margin-right:6px'>80~89</span>"
-            "<span style='background:#dc2626;color:white;padding:2px 8px;border-radius:3px'>RS&lt;80</span>"
-            "</div>"
-        )
+                daily_cells = ""
+                for d in recent_dates:
+                    row_d = df_rs_hist[(df_rs_hist["ticker"] == t) & (df_rs_hist["date"] == d)]
+                    val   = float(row_d["rs_rating"].values[0]) if not row_d.empty else None
+                    daily_cells += rs_cell(val)
 
-        table_html = (
-            "<div style='overflow-x:auto'>"
-            "<table style='border-collapse:collapse;width:100%;font-size:13px'>"
-            f"<thead>{header}</thead>"
-            f"<tbody>{''.join(rows_html)}</tbody>"
-            "</table>"
-            "</div>"
-            + legend
-        )
-        st.markdown(table_html, unsafe_allow_html=True)
+                rows_html.append(
+                    f"<tr style='border-bottom:1px solid #374151;height:{ROW_H}px'>"
+                    f"<td style='padding:5px 10px;font-weight:500'>{name}</td>"
+                    f"<td style='padding:5px 8px;color:#9ca3af;font-size:12px'>{added}</td>"
+                    f"<td style='text-align:center;padding:5px 8px'>{rs_disp}</td>"
+                    + delta_cell(delta) + daily_cells + "</tr>"
+                )
+
+            conn_rs.close()
+
+            legend = (
+                "<div style='margin-top:8px;font-size:12px;color:#9ca3af'>"
+                "<span style='background:#16a34a;color:white;padding:2px 8px;border-radius:3px;margin-right:6px'>RS≥95</span>"
+                "<span style='background:#ca8a04;color:white;padding:2px 8px;border-radius:3px;margin-right:6px'>90~94</span>"
+                "<span style='background:#f3f4f6;color:#1f2937;padding:2px 8px;border-radius:3px;margin-right:6px'>80~89</span>"
+                "<span style='background:#dc2626;color:white;padding:2px 8px;border-radius:3px'>RS&lt;80</span>"
+                "</div>"
+            )
+            st.markdown(
+                "<div style='overflow-x:auto'>"
+                "<table style='border-collapse:collapse;width:100%;font-size:13px'>"
+                f"<thead>{header}</thead>"
+                f"<tbody>{''.join(rows_html)}</tbody>"
+                "</table></div>" + legend,
+                unsafe_allow_html=True,
+            )
 
 
 # ==========================================

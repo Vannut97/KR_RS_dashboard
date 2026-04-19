@@ -606,19 +606,13 @@ with tab_screener:
                 on_select="rerun", key="scatter_chart",
             )
 
-        # ── 버블 클릭 처리 ──
+        # ── 버블 클릭 처리: 상세 패널 표시만 (워치리스트는 패널 버튼으로) ──
         pts = getattr(getattr(sc_event, "selection", None), "points", [])
         if pts:
             cd = pts[0].get("customdata", [])
             clicked_ticker = cd[0] if cd else None
             if clicked_ticker:
                 st.session_state["detail_ticker"] = clicked_ticker
-                already = [w["ticker"] for w in wl_get()]
-                if clicked_ticker in already:
-                    st.toast(f"이미 워치리스트에 있습니다: {ticker_name_map.get(clicked_ticker, clicked_ticker)}", icon="📌")
-                else:
-                    wl_add(clicked_ticker)
-                    st.toast(f"⭐ {ticker_name_map.get(clicked_ticker, clicked_ticker)} 워치리스트에 추가됨!", icon="⭐")
 
         # ── 우측 상세 패널: 3개년 실적(값) + YoY% 2×2 병렬 차트 ──
         with col_detail:
@@ -628,6 +622,21 @@ with tab_screener:
                 if not fund_row.empty:
                     r    = fund_row.iloc[0]
                     name = ticker_name_map.get(detail_ticker, detail_ticker)
+
+                    # ── 워치리스트 토글 버튼 ──
+                    in_watchlist = detail_ticker in [w["ticker"] for w in wl_get()]
+                    if in_watchlist:
+                        if st.button("✅ 워치리스트에 있음  ·  제거",
+                                     key="wl_toggle", use_container_width=True):
+                            wl_remove(detail_ticker)
+                            st.toast(f"제거됨: {ticker_name_map.get(detail_ticker, detail_ticker)}", icon="🗑️")
+                            st.rerun()
+                    else:
+                        if st.button("⭐ 워치리스트에 추가",
+                                     key="wl_toggle", use_container_width=True):
+                            wl_add(detail_ticker)
+                            st.toast(f"⭐ {ticker_name_map.get(detail_ticker, detail_ticker)} 추가됨!", icon="⭐")
+                            st.rerun()
 
                     # ── 연도 레이블 ──
                     yr0 = int(r["annual_year_2yr"]) if pd.notna(r.get("annual_year_2yr")) else "3년전"

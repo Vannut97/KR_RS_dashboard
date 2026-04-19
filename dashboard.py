@@ -241,6 +241,9 @@ if not df_fund.empty:
         "annual_revenue_yoy", "annual_eps_yoy",
         "annual_revenue_2yr", "annual_eps_2yr",
         "annual_op_margin", "annual_net_margin",
+        "annual_revenue_act", "annual_revenue_prev_act", "annual_revenue_2yr_act",
+        "annual_eps_act", "annual_eps_prev_act", "annual_eps_2yr_act",
+        "annual_year_curr", "annual_year_prev", "annual_year_2yr",
     ]
     fund_cols = [c for c in fund_cols if c in df_fund.columns]
     df = df.merge(df_fund[fund_cols], on="ticker", how="left")
@@ -617,81 +620,128 @@ with tab_screener:
                     wl_add(clicked_ticker)
                     st.toast(f"⭐ {ticker_name_map.get(clicked_ticker, clicked_ticker)} 워치리스트에 추가됨!", icon="⭐")
 
-        # ── 우측 상세 패널: 3개년 YoY 막대 그래프 ──
+        # ── 우측 상세 패널: 3개년 실적(값) + YoY% 2×2 병렬 차트 ──
         with col_detail:
             detail_ticker = st.session_state.get("detail_ticker")
             if detail_ticker and has_fundamentals:
                 fund_row = df_fund[df_fund["ticker"] == detail_ticker]
                 if not fund_row.empty:
-                    r = fund_row.iloc[0]
+                    r    = fund_row.iloc[0]
                     name = ticker_name_map.get(detail_ticker, detail_ticker)
 
-                    labels = ["전전년", "전년", "최근"]
-                    eps_vals = [
+                    # ── 연도 레이블 ──
+                    yr0 = int(r["annual_year_2yr"]) if pd.notna(r.get("annual_year_2yr")) else "3년전"
+                    yr1 = int(r["annual_year_prev"]) if pd.notna(r.get("annual_year_prev")) else "2년전"
+                    yr2 = int(r["annual_year_curr"]) if pd.notna(r.get("annual_year_curr")) else "작년"
+                    yoy_labels = [str(yr0), str(yr1), str(yr2)]
+                    act_labels = [str(yr0), str(yr1), str(yr2)]
+
+                    # ── EPS 실제값 (원) ──
+                    eps_act = [
+                        r.get("annual_eps_2yr_act")  if pd.notna(r.get("annual_eps_2yr_act"))  else None,
+                        r.get("annual_eps_prev_act") if pd.notna(r.get("annual_eps_prev_act")) else None,
+                        r.get("annual_eps_act")      if pd.notna(r.get("annual_eps_act"))      else None,
+                    ]
+                    # ── EPS YoY (%) ──
+                    eps_yoy = [
                         r.get("annual_eps_2yr") if pd.notna(r.get("annual_eps_2yr")) else None,
                         r.get("annual_eps_yoy") if pd.notna(r.get("annual_eps_yoy")) else None,
-                        r.get("eps_yoy")         if pd.notna(r.get("eps_yoy"))        else None,
+                        r.get("eps_yoy")        if pd.notna(r.get("eps_yoy"))        else None,
                     ]
-                    rev_vals = [
+                    # ── 매출 실제값 (억원) ──
+                    rev_act = [
+                        (r.get("annual_revenue_2yr_act")  / 1e8) if pd.notna(r.get("annual_revenue_2yr_act"))  else None,
+                        (r.get("annual_revenue_prev_act") / 1e8) if pd.notna(r.get("annual_revenue_prev_act")) else None,
+                        (r.get("annual_revenue_act")      / 1e8) if pd.notna(r.get("annual_revenue_act"))      else None,
+                    ]
+                    # ── 매출 YoY (%) ──
+                    rev_yoy = [
                         r.get("annual_revenue_2yr") if pd.notna(r.get("annual_revenue_2yr")) else None,
                         r.get("annual_revenue_yoy") if pd.notna(r.get("annual_revenue_yoy")) else None,
-                        r.get("revenue_yoy")         if pd.notna(r.get("revenue_yoy"))        else None,
+                        r.get("revenue_yoy")        if pd.notna(r.get("revenue_yoy"))        else None,
                     ]
 
-                    def bar_colors(vals):
-                        return ["#3b82f6" if (v is not None and v >= 0) else "#ef4444"
-                                for v in vals]
+                    def bar_colors(vals, pos_col="#3b82f6", neg_col="#ef4444"):
+                        return [pos_col if (v is not None and v >= 0) else neg_col for v in vals]
 
-                    fig_bar = go.Figure()
-                    fig_bar.add_trace(go.Bar(
-                        name="EPS YoY%", x=labels, y=eps_vals,
-                        marker_color=bar_colors(eps_vals),
-                        text=[f"{v:.1f}%" if v is not None else "N/A" for v in eps_vals],
-                        textposition="outside", textfont=dict(size=12, color="#111111"),
-                    ))
-                    fig_bar.add_trace(go.Bar(
-                        name="매출 YoY%", x=labels, y=rev_vals,
-                        marker_color=bar_colors(rev_vals),
-                        text=[f"{v:.1f}%" if v is not None else "N/A" for v in rev_vals],
-                        textposition="outside", textfont=dict(size=12, color="#111111"),
-                        visible=False,
-                    ))
-                    fig_bar.update_layout(
-                        title=dict(text=name, font=dict(size=13, color="#111111"), x=0.5),
-                        height=560,
-                        paper_bgcolor="white", plot_bgcolor="#f8fafc",
-                        margin=dict(t=40, b=40, l=40, r=20),
-                        font=dict(size=12, color="#111111"),
-                        legend=dict(orientation="h", y=-0.08, font=dict(size=11)),
-                        yaxis=dict(
-                            title="YoY (%)",
-                            tickfont=dict(size=11, color="#111111"),
-                            gridcolor="#e5e7eb",
-                            zeroline=True, zerolinecolor="#555555", zerolinewidth=1.5,
-                        ),
-                        xaxis=dict(tickfont=dict(size=12, color="#111111")),
-                        updatemenus=[dict(
-                            type="buttons", direction="right",
-                            x=0.5, xanchor="center", y=1.12,
-                            buttons=[
-                                dict(label="EPS YoY",
-                                     method="update",
-                                     args=[{"visible": [True, False]},
-                                           {"title.text": f"{name} · EPS YoY 3개년"}]),
-                                dict(label="매출 YoY",
-                                     method="update",
-                                     args=[{"visible": [False, True]},
-                                           {"title.text": f"{name} · 매출 YoY 3개년"}]),
-                            ],
-                            bgcolor="#f1f5f9", bordercolor="#cbd5e1",
-                            font=dict(size=11, color="#111111"),
-                        )],
+                    from plotly.subplots import make_subplots
+                    fig_bar = make_subplots(
+                        rows=2, cols=2,
+                        subplot_titles=[
+                            "EPS 실적 (원)", "EPS YoY (%)",
+                            "매출 실적 (억원)", "매출 YoY (%)",
+                        ],
+                        vertical_spacing=0.16,
+                        horizontal_spacing=0.12,
                     )
-                    fig_bar.add_hline(y=0, line_color="#555555", line_width=1)
+
+                    # [1,1] EPS 실적
+                    fig_bar.add_trace(go.Bar(
+                        x=act_labels, y=eps_act,
+                        marker_color=bar_colors(eps_act, "#3b82f6", "#ef4444"),
+                        text=[f"{v:,.0f}원" if v is not None else "N/A" for v in eps_act],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#111111"),
+                        showlegend=False,
+                    ), row=1, col=1)
+
+                    # [1,2] EPS YoY
+                    fig_bar.add_trace(go.Bar(
+                        x=yoy_labels, y=eps_yoy,
+                        marker_color=bar_colors(eps_yoy),
+                        text=[f"{v:.1f}%" if v is not None else "N/A" for v in eps_yoy],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#111111"),
+                        showlegend=False,
+                    ), row=1, col=2)
+
+                    # [2,1] 매출 실적
+                    fig_bar.add_trace(go.Bar(
+                        x=act_labels, y=rev_act,
+                        marker_color=bar_colors(rev_act, "#10b981", "#ef4444"),
+                        text=[f"{v:,.0f}억" if v is not None else "N/A" for v in rev_act],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#111111"),
+                        showlegend=False,
+                    ), row=2, col=1)
+
+                    # [2,2] 매출 YoY
+                    fig_bar.add_trace(go.Bar(
+                        x=yoy_labels, y=rev_yoy,
+                        marker_color=bar_colors(rev_yoy, "#10b981", "#ef4444"),
+                        text=[f"{v:.1f}%" if v is not None else "N/A" for v in rev_yoy],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#111111"),
+                        showlegend=False,
+                    ), row=2, col=2)
+
+                    # 각 subplot y축 제로라인
+                    for axis in ["yaxis", "yaxis2", "yaxis3", "yaxis4"]:
+                        fig_bar.update_layout(**{axis: dict(
+                            zeroline=True, zerolinecolor="#555555", zerolinewidth=1.2,
+                            gridcolor="#e5e7eb",
+                            tickfont=dict(size=10, color="#111111"),
+                        )})
+
+                    fig_bar.update_layout(
+                        title=dict(
+                            text=f"<b>{name}</b>",
+                            font=dict(size=13, color="#111111"), x=0.5,
+                        ),
+                        height=620,
+                        paper_bgcolor="white", plot_bgcolor="#f8fafc",
+                        margin=dict(t=60, b=30, l=30, r=10),
+                        font=dict(size=11, color="#111111"),
+                    )
+                    # subplot 제목 폰트
+                    for ann in fig_bar.layout.annotations:
+                        ann.font.size  = 11
+                        ann.font.color = "#374151"
+
                     st.plotly_chart(fig_bar, use_container_width=True, key="bar_detail")
                 else:
                     st.markdown(
-                        "<div style='height:560px;display:flex;align-items:center;"
+                        "<div style='height:620px;display:flex;align-items:center;"
                         "justify-content:center;color:#9ca3af;font-size:13px;"
                         "border:1px dashed #374151;border-radius:8px'>"
                         "펀더멘탈 데이터 없음</div>",
@@ -699,11 +749,11 @@ with tab_screener:
                     )
             else:
                 st.markdown(
-                    "<div style='height:560px;display:flex;align-items:center;"
+                    "<div style='height:620px;display:flex;align-items:center;"
                     "justify-content:center;color:#9ca3af;font-size:13px;"
                     "border:1px dashed #374151;border-radius:8px;text-align:center;"
                     "padding:20px'>"
-                    "📊<br><br>버블을 클릭하면<br>EPS · 매출<br>3개년 YoY가<br>표시됩니다</div>",
+                    "📊<br><br>버블을 클릭하면<br>EPS · 매출<br>3개년 실적 & YoY%가<br>표시됩니다</div>",
                     unsafe_allow_html=True,
                 )
 

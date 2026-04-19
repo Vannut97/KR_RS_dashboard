@@ -272,6 +272,18 @@ def collect_single_fundamental(ticker, corp_code):
             a_prev.get("eps"), a_prev2.get("eps")
         )
 
+        # 연간 실제 값 (3개년) — 차트 표시용
+        result["annual_revenue_act"]      = a_curr.get("revenue")   # 작년
+        result["annual_revenue_prev_act"] = a_prev.get("revenue")   # 2년전
+        result["annual_revenue_2yr_act"]  = a_prev2.get("revenue")  # 3년전
+        result["annual_eps_act"]          = a_curr.get("eps")       # 작년
+        result["annual_eps_prev_act"]     = a_prev.get("eps")       # 2년전
+        result["annual_eps_2yr_act"]      = a_prev2.get("eps")      # 3년전
+        # 연도 레이블 (파이프라인 실행 연도 기준)
+        result["annual_year_curr"]  = current_year - 1
+        result["annual_year_prev"]  = current_year - 2
+        result["annual_year_2yr"]   = current_year - 3
+
         # 연간 마진율
         result["annual_op_margin"] = pct_margin(
             a_curr.get("op_profit"), a_curr.get("revenue")

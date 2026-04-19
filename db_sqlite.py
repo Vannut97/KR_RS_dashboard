@@ -153,9 +153,34 @@ def save_fundamentals(df_fund, trading_date, db_name="quant_dashboard.db"):
         annual_eps_2yr REAL,
         annual_op_margin REAL,
         annual_net_margin REAL,
+        annual_revenue_act      BIGINT,
+        annual_revenue_prev_act BIGINT,
+        annual_revenue_2yr_act  BIGINT,
+        annual_eps_act          INTEGER,
+        annual_eps_prev_act     INTEGER,
+        annual_eps_2yr_act      INTEGER,
+        annual_year_curr        INTEGER,
+        annual_year_prev        INTEGER,
+        annual_year_2yr         INTEGER,
         PRIMARY KEY (date, ticker)
     )
     ''')
+
+    # 기존 테이블에 새 컬럼이 없으면 추가 (마이그레이션)
+    existing_cols = [row[1] for row in cursor.execute('PRAGMA table_info(fundamentals)').fetchall()]
+    for col_name, col_type in [
+        ('annual_revenue_act',      'BIGINT'),
+        ('annual_revenue_prev_act', 'BIGINT'),
+        ('annual_revenue_2yr_act',  'BIGINT'),
+        ('annual_eps_act',          'INTEGER'),
+        ('annual_eps_prev_act',     'INTEGER'),
+        ('annual_eps_2yr_act',      'INTEGER'),
+        ('annual_year_curr',        'INTEGER'),
+        ('annual_year_prev',        'INTEGER'),
+        ('annual_year_2yr',         'INTEGER'),
+    ]:
+        if col_name not in existing_cols:
+            cursor.execute(f'ALTER TABLE fundamentals ADD COLUMN {col_name} {col_type}')
 
     print(f"\n[{trading_date}] 🚀 펀더멘탈 데이터 저장 시작...")
 
@@ -191,6 +216,15 @@ def save_fundamentals(df_fund, trading_date, db_name="quant_dashboard.db"):
             safe_val(row.get('annual_eps_2yr')),
             safe_val(row.get('annual_op_margin')),
             safe_val(row.get('annual_net_margin')),
+            safe_val(row.get('annual_revenue_act')),
+            safe_val(row.get('annual_revenue_prev_act')),
+            safe_val(row.get('annual_revenue_2yr_act')),
+            safe_val(row.get('annual_eps_act')),
+            safe_val(row.get('annual_eps_prev_act')),
+            safe_val(row.get('annual_eps_2yr_act')),
+            safe_val(row.get('annual_year_curr')),
+            safe_val(row.get('annual_year_prev')),
+            safe_val(row.get('annual_year_2yr')),
         ))
 
     try:
@@ -203,8 +237,12 @@ def save_fundamentals(df_fund, trading_date, db_name="quant_dashboard.db"):
          roe, roa, debt_ratio,
          annual_revenue_yoy, annual_eps_yoy,
          annual_revenue_2yr, annual_eps_2yr,
-         annual_op_margin, annual_net_margin)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         annual_op_margin, annual_net_margin,
+         annual_revenue_act, annual_revenue_prev_act, annual_revenue_2yr_act,
+         annual_eps_act, annual_eps_prev_act, annual_eps_2yr_act,
+         annual_year_curr, annual_year_prev, annual_year_2yr)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', records)
 
         conn.commit()

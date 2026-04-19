@@ -154,15 +154,27 @@ def load_fundamentals():
 
 @st.cache_data(ttl=3600)
 def load_universe():
-    """KRX 종목 정보 로드. Sector/Industry 컬럼이 있으면 함께 반환."""
-    df_krx = fdr.StockListing("KRX")
-    keep   = ["Code", "Name", "Market"]
-    rename = {"Code": "ticker", "Name": "name", "Market": "market"}
-    for col in ["Sector", "Industry"]:
-        if col in df_krx.columns:
-            keep.append(col)
-            rename[col] = col.lower()
-    return df_krx[keep].rename(columns=rename).copy()
+    """KRX 종목 정보 로드. Sector/Industry 컬럼이 있으면 함께 반환.
+    FDR 실패 시 DB rs_ratings 테이블의 ticker 목록으로 폴백한다."""
+    try:
+        df_krx = fdr.StockListing("KRX")
+        keep   = ["Code", "Name", "Market"]
+        rename = {"Code": "ticker", "Name": "name", "Market": "market"}
+        for col in ["Sector", "Industry"]:
+            if col in df_krx.columns:
+                keep.append(col)
+                rename[col] = col.lower()
+        return df_krx[keep].rename(columns=rename).copy()
+    except Exception:
+        # KRX API 접근 실패 시 DB에서 ticker 목록으로 폴백
+        conn = sqlite3.connect(DB_PATH)
+        df_fallback = pd.read_sql(
+            "SELECT DISTINCT ticker FROM rs_ratings", conn
+        )
+        conn.close()
+        df_fallback["name"]   = df_fallback["ticker"]
+        df_fallback["market"] = ""
+        return df_fallback
 
 
 @st.cache_data(ttl=300)

@@ -230,7 +230,11 @@ df_universe = load_universe()
 report_tickers, all_reports = load_report_index()
 df_surge, surge_latest, surge_week_ago = load_rs_surge()
 
-df = df_rs.merge(df_universe, on="ticker", how="left")
+# df_rs(SELECT *)에 이미 name/market이 있으면 df_universe에서 제거 후 merge
+_universe_merge = df_universe.drop(
+    columns=[c for c in ["name", "market"] if c in df_rs.columns and c in df_universe.columns]
+)
+df = df_rs.merge(_universe_merge, on="ticker", how="left")
 
 if not df_fund.empty:
     fund_cols = [

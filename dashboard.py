@@ -164,7 +164,8 @@ def load_universe():
     if "name"   in existing_cols: cols.append("name")
     if "market" in existing_cols: cols.append("market")
     df = pd.read_sql(
-        f"SELECT DISTINCT {', '.join(cols)} FROM rs_ratings", conn
+        f"SELECT {', '.join(cols)} FROM rs_ratings "
+        f"WHERE date = (SELECT MAX(date) FROM rs_ratings)", conn
     )
     conn.close()
     if "name"   not in df.columns: df["name"]   = df["ticker"]

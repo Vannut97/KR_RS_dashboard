@@ -6,7 +6,6 @@ import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import FinanceDataReader as fdr
 from db_sqlite import (
     get_all_report_tickers, get_all_reports,
 )
@@ -154,27 +153,23 @@ def load_fundamentals():
 
 @st.cache_data(ttl=3600)
 def load_universe():
-    """KRX 종목 정보 로드. Sector/Industry 컬럼이 있으면 함께 반환.
-    FDR 실패 시 DB rs_ratings 테이블의 ticker 목록으로 폴백한다."""
-    try:
-        df_krx = fdr.StockListing("KRX")
-        keep   = ["Code", "Name", "Market"]
-        rename = {"Code": "ticker", "Name": "name", "Market": "market"}
-        for col in ["Sector", "Industry"]:
-            if col in df_krx.columns:
-                keep.append(col)
-                rename[col] = col.lower()
-        return df_krx[keep].rename(columns=rename).copy()
-    except Exception:
-        # KRX API 접근 실패 시 DB에서 ticker 목록으로 폴백
-        conn = sqlite3.connect(DB_PATH)
-        df_fallback = pd.read_sql(
-            "SELECT DISTINCT ticker FROM rs_ratings", conn
-        )
-        conn.close()
-        df_fallback["name"]   = df_fallback["ticker"]
-        df_fallback["market"] = ""
-        return df_fallback
+    """DB rs_ratings 테이블에서 종목 정보(ticker, name, market)를 로드한다.
+    name/market 컬럼이 없는 구버전 DB는 ticker만 반환한다."""
+    conn = sqlite3.connect(DB_PATH)
+    existing_cols = [
+        row[1] for row in
+        conn.execute("PRAGMA table_info(rs_ratings)").fetchall()
+    ]
+    cols = ["ticker"]
+    if "name"   in existing_cols: cols.append("name")
+    if "market" in existing_cols: cols.append("market")
+    df = pd.read_sql(
+        f"SELECT DISTINCT {', '.join(cols)} FROM rs_ratings", conn
+    )
+    conn.close()
+    if "name"   not in df.columns: df["name"]   = df["ticker"]
+    if "market" not in df.columns: df["market"] = ""
+    return df
 
 
 @st.cache_data(ttl=300)

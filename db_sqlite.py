@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from datetime import datetime
 
-def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db"):
+def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_df=None):
     """RS Rating 데이터를 SQLite에 저장한다.
 
     Args:
@@ -20,6 +20,8 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db"):
     CREATE TABLE IF NOT EXISTS rs_ratings (
         date TEXT,
         ticker TEXT,
+        name TEXT,
+        market TEXT,
         latest_close INTEGER,
         market_cap REAL,
         avg_vol_10d INTEGER,
@@ -46,11 +48,21 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db"):
     for col_name, col_type in [
         ('composite_score', 'REAL'), ('rs_rating', 'INTEGER'),
         ('market_cap', 'REAL'), ('avg_vol_10d', 'INTEGER'),
+        ('name', 'TEXT'), ('market', 'TEXT'),
     ]:
         if col_name not in existing_cols:
             cursor.execute(f'ALTER TABLE rs_ratings ADD COLUMN {col_name} {col_type}')
 
     print(f"\n[{trading_date}] 🚀 SQLite 데이터 저장 시작...")
+
+    # universe_df에서 ticker → (name, market) 맵 생성
+    name_map   = {}
+    market_map = {}
+    if universe_df is not None and not universe_df.empty:
+        for _, urow in universe_df.iterrows():
+            t = str(urow['ticker'])
+            name_map[t]   = str(urow.get('name', ''))
+            market_map[t] = str(urow.get('market', ''))
 
     records = []
 
@@ -67,9 +79,12 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db"):
 
     # 4. 데이터 변환
     for _, row in df_rs.iterrows():
+        t = str(row['ticker'])
         records.append((
             trading_date,
-            row['ticker'],
+            t,
+            name_map.get(t, ''),
+            market_map.get(t, ''),
             int(row['latest_close']),
             parse_float(row.get('market_cap')),
             parse_int(row.get('avg_vol_10d')),
@@ -87,11 +102,11 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db"):
     try:
         cursor.executemany('''
         INSERT OR REPLACE INTO rs_ratings
-        (date, ticker, latest_close, market_cap, avg_vol_10d,
+        (date, ticker, name, market, latest_close, market_cap, avg_vol_10d,
          ret_1d, ret_1w, ret_1m, ret_3m, ret_6m, ret_12m,
          rs_1d, rs_1w, rs_1m, rs_3m, rs_6m, rs_12m,
          composite_score, rs_rating)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', records)
 
         conn.commit()
@@ -378,7 +393,8 @@ if __name__ == "__main__":
 
     # ── 1단계: RS 파이프라인 (전체 종목 수집) ──
     print("🚀 전체 종목 가격 수집을 시작합니다.\n")
-    df_prices = run_batch_collection()
+    universe_df = get_filtered_universe()
+    df_prices   = run_batch_collection()
 
     if df_prices is None or df_prices.empty:
         print("❌ 가격 데이터 수집 실패. 파이프라인을 종료합니다.")
@@ -388,7 +404,7 @@ if __name__ == "__main__":
     print(f"\n📅 최신 거래일: {trading_date}")
 
     df_rs = calculate_rs_ratings(df_prices)
-    save_to_sqlite(df_rs, trading_date)
+    save_to_sqlite(df_rs, trading_date, universe_df=universe_df)
 
     # ── 2단계: 펀더멘탈 파이프라인 (DART_API_KEY가 있을 때만) ──
     #

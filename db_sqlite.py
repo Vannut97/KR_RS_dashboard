@@ -39,6 +39,8 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_d
         rs_12m INTEGER,
         composite_score REAL,
         rs_rating INTEGER,
+        avg_vol_20d    INTEGER,
+        avg_amount_20d BIGINT,
         PRIMARY KEY (date, ticker)
     )
     ''')
@@ -46,9 +48,14 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_d
     # 기존 테이블에 새 컬럼이 없으면 추가 (마이그레이션)
     existing_cols = [row[1] for row in cursor.execute('PRAGMA table_info(rs_ratings)').fetchall()]
     for col_name, col_type in [
-        ('composite_score', 'REAL'), ('rs_rating', 'INTEGER'),
-        ('market_cap', 'REAL'), ('avg_vol_10d', 'INTEGER'),
-        ('name', 'TEXT'), ('market', 'TEXT'),
+        ('composite_score',  'REAL'),
+        ('rs_rating',        'INTEGER'),
+        ('market_cap',       'REAL'),
+        ('avg_vol_10d',      'INTEGER'),
+        ('name',             'TEXT'),
+        ('market',           'TEXT'),
+        ('avg_vol_20d',      'INTEGER'),
+        ('avg_amount_20d',   'BIGINT'),
     ]:
         if col_name not in existing_cols:
             cursor.execute(f'ALTER TABLE rs_ratings ADD COLUMN {col_name} {col_type}')
@@ -96,6 +103,8 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_d
             parse_int(row['RS_6M']), parse_int(row['RS_12M']),
             parse_float(row['composite_score']),
             parse_int(row['rs_rating']),
+            parse_int(row.get('avg_vol_20d')),
+            parse_int(row.get('avg_amount_20d')),
         ))
 
     # 5. 데이터 삽입
@@ -105,8 +114,10 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_d
         (date, ticker, name, market, latest_close, market_cap, avg_vol_10d,
          ret_1d, ret_1w, ret_1m, ret_3m, ret_6m, ret_12m,
          rs_1d, rs_1w, rs_1m, rs_3m, rs_6m, rs_12m,
-         composite_score, rs_rating)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         composite_score, rs_rating,
+         avg_vol_20d, avg_amount_20d)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?)
         ''', records)
 
         conn.commit()

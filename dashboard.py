@@ -300,6 +300,13 @@ st.sidebar.markdown("---")
 price_min    = st.sidebar.number_input("💰 최소 종가", value=0, step=1000)
 price_max    = st.sidebar.number_input("💰 최대 종가 (0=무제한)", value=0, step=10000)
 st.sidebar.markdown("---")
+avg_vol_20d_min    = st.sidebar.number_input(
+    "📦 20일 평균거래량 최소 (주, 0=비활성)", value=0, step=10000,
+)
+avg_amount_20d_min = st.sidebar.number_input(
+    "💵 20일 평균거래대금 최소 (억원, 0=비활성)", value=0, step=10,
+)
+st.sidebar.markdown("---")
 search_query = st.sidebar.text_input("🔎 종목명/코드 검색")
 
 # ── 신규 보고서 알림 ──
@@ -380,6 +387,13 @@ def render_screener():
     filtered = filtered[filtered["latest_close"] >= price_min]
     if price_max > 0:
         filtered = filtered[filtered["latest_close"] <= price_max]
+    if avg_vol_20d_min > 0 and "avg_vol_20d" in filtered.columns:
+        filtered = filtered[filtered["avg_vol_20d"].fillna(0) >= avg_vol_20d_min]
+    if avg_amount_20d_min > 0 and "avg_amount_20d" in filtered.columns:
+        # 사용자 입력: 억원 단위 → 원 단위로 변환 후 비교
+        filtered = filtered[
+            filtered["avg_amount_20d"].fillna(0) >= avg_amount_20d_min * 1e8
+        ]
     if search_query:
         mask = (
             filtered["ticker"].str.contains(search_query, case=False, na=False)

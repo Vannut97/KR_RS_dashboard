@@ -301,6 +301,13 @@ with st.sidebar.expander("📈 신고가 근접 필터"):
     )
 
 st.sidebar.markdown("---")
+sma_align = st.sidebar.checkbox(
+    "📐 SMA 정배열  (50 > 150 > 200)",
+    value=False,
+    help="종가 기준 SMA50 > SMA150 > SMA200 인 종목만 표시 (상승 추세 정배열)",
+)
+
+st.sidebar.markdown("---")
 price_min    = st.sidebar.number_input("💰 최소 종가", value=0, step=1000)
 price_max    = st.sidebar.number_input("💰 최대 종가 (0=무제한)", value=0, step=10000)
 st.sidebar.markdown("---")
@@ -405,6 +412,15 @@ def render_screener():
         )
         filtered = filtered[mask]
 
+    # ── SMA 정배열 필터 (SMA50 > SMA150 > SMA200) ──
+    sma_cols = ["sma50", "sma150", "sma200"]
+    if sma_align and all(c in filtered.columns for c in sma_cols):
+        filtered = filtered[
+            filtered[sma_cols].notna().all(axis=1)
+            & (filtered["sma50"]  > filtered["sma150"])
+            & (filtered["sma150"] > filtered["sma200"])
+        ]
+
     # ── 표시 컬럼 ──
     display_cols = [
         "ticker", "has_report", "name", "market",
@@ -426,10 +442,10 @@ def render_screener():
     display_cols = [c for c in display_cols if c in filtered.columns]
     df_display   = filtered[display_cols].reset_index(drop=True)
 
-    # ── RS × 펀더멘탈 산점도 (라벨 제거 → 차트 타이틀로 통합) ──
+    # ── RS × 펀더멘탈 산점도 — 필터 적용된 종목만 표시 ──
     if has_fundamentals:
         df_bubble = (
-            df[df["date"] == selected_date]
+            filtered                                   # ← 사이드바 필터 적용된 df 사용
             .dropna(subset=["rs_rating", "eps_yoy"])
             .nlargest(200, "rs_rating")
             .copy()
@@ -499,7 +515,11 @@ def render_screener():
             color_discrete_map={"KOSPI": "#003A70", "KOSDAQ": "#16a34a"},
             hover_name="name",
             custom_data=custom_cols,
-            title=f"RS Rating × EPS YoY — RS 상위 200종목 ({selected_date})",
+            title=(
+                f"RS Rating × EPS YoY — "
+                f"{'필터 적용 ' if (selected_market != '전체' or sma_align or search_query or avg_vol_min > 0 or avg_amount_min > 0) else 'RS '}상위 "
+                f"{min(200, len(df_bubble))}종목 ({selected_date})"
+            ),
         )
         fig_sc.update_traces(
             cliponaxis=False,

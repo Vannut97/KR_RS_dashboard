@@ -39,10 +39,19 @@ def calculate_rs_ratings(df_prices):
         last_10     = group.tail(10)
         avg_vol_10d = int(last_10['volume'].mean()) if len(last_10) > 0 else None
 
+        # SMA 계산 (50/150/200일 단순이동평균, 데이터 부족 시 None)
+        def sma(n):
+            if len(group) >= n:
+                return round(float(group['close'].tail(n).mean()), 2)
+            return None
+
         stock_data = {
             'ticker':       ticker,
             'latest_close': current_close,
             'avg_vol_10d':  avg_vol_10d,
+            'sma50':        sma(50),
+            'sma150':       sma(150),
+            'sma200':       sma(200),
         }
 
         # 기간별 수익률 산출 — 데이터 부족 시 None(NULL)

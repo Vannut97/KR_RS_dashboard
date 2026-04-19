@@ -52,6 +52,9 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_d
         ('avg_vol_10d',     'INTEGER'),
         ('name',            'TEXT'),
         ('market',          'TEXT'),
+        ('sma50',           'REAL'),
+        ('sma150',          'REAL'),
+        ('sma200',          'REAL'),
     ]:
         if col_name not in existing_cols:
             cursor.execute(f'ALTER TABLE rs_ratings ADD COLUMN {col_name} {col_type}')
@@ -99,6 +102,9 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_d
             parse_int(row['RS_6M']), parse_int(row['RS_12M']),
             parse_float(row['composite_score']),
             parse_int(row['rs_rating']),
+            parse_float(row.get('sma50')),
+            parse_float(row.get('sma150')),
+            parse_float(row.get('sma200')),
         ))
 
     # 5. 데이터 삽입
@@ -108,8 +114,9 @@ def save_to_sqlite(df_rs, trading_date, db_name="quant_dashboard.db", universe_d
         (date, ticker, name, market, latest_close, market_cap, avg_vol_10d,
          ret_1d, ret_1w, ret_1m, ret_3m, ret_6m, ret_12m,
          rs_1d, rs_1w, rs_1m, rs_3m, rs_6m, rs_12m,
-         composite_score, rs_rating)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         composite_score, rs_rating,
+         sma50, sma150, sma200)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', records)
 
         conn.commit()

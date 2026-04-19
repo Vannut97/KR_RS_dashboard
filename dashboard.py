@@ -1079,7 +1079,7 @@ with tab_watchlist:
 
     if not wl_list:
         st.info("워치리스트가 비어 있습니다.  \n산점도 버블 클릭으로 종목을 추가하세요.")
-
+    else:
         wl_tickers    = [w["ticker"] for w in wl_list]
         dates_sorted  = sorted(df["date"].unique())
         latest_date   = dates_sorted[-1] if dates_sorted else None

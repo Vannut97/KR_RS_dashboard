@@ -105,7 +105,7 @@ def fetch_1yr_daily_price(ticker, access_token):
     if all_dfs:
         final_df = pd.concat(all_dfs, ignore_index=True)
         final_df.columns = ['date', 'close', 'volume']
-        final_df['close'] = pd.to_numeric(final_df['close'])
+        final_df['close']  = pd.to_numeric(final_df['close'])
         final_df['volume'] = pd.to_numeric(final_df['volume'])
         final_df['ticker'] = ticker
         

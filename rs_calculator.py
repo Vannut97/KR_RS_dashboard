@@ -35,22 +35,14 @@ def calculate_rs_ratings(df_prices):
         group = group.reset_index(drop=True)
         current_close = group.iloc[-1]['close']
 
-        # 10일 / 20일 평균 거래량 계산
-        last_10 = group.tail(10)
-        last_20 = group.tail(20)
-        avg_vol_10d  = int(last_10['volume'].mean()) if len(last_10) > 0 else None
-        avg_vol_20d  = int(last_20['volume'].mean()) if len(last_20) > 0 else None
-
-        # 20일 평균 거래대금 (근사: 종가 × 거래량)
-        avg_amount_20d = int((last_20['close'] * last_20['volume']).mean()) \
-                         if len(last_20) > 0 else None
+        # 10일 평균 거래량 계산
+        last_10     = group.tail(10)
+        avg_vol_10d = int(last_10['volume'].mean()) if len(last_10) > 0 else None
 
         stock_data = {
-            'ticker': ticker,
+            'ticker':       ticker,
             'latest_close': current_close,
-            'avg_vol_10d':    avg_vol_10d,
-            'avg_vol_20d':    avg_vol_20d,
-            'avg_amount_20d': avg_amount_20d,
+            'avg_vol_10d':  avg_vol_10d,
         }
 
         # 기간별 수익률 산출 — 데이터 부족 시 None(NULL)

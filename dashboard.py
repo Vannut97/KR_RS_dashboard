@@ -300,11 +300,12 @@ st.sidebar.markdown("---")
 price_min    = st.sidebar.number_input("💰 최소 종가", value=0, step=1000)
 price_max    = st.sidebar.number_input("💰 최대 종가 (0=무제한)", value=0, step=10000)
 st.sidebar.markdown("---")
-avg_vol_20d_min    = st.sidebar.number_input(
-    "📦 20일 평균거래량 최소 (주, 0=비활성)", value=0, step=10000,
+avg_vol_min    = st.sidebar.number_input(
+    "📦 10일 평균거래량 최소 (주, 0=비활성)", value=0, step=10000,
 )
-avg_amount_20d_min = st.sidebar.number_input(
-    "💵 20일 평균거래대금 최소 (억원, 0=비활성)", value=0, step=10,
+avg_amount_min = st.sidebar.number_input(
+    "💵 평균거래대금 최소 (억원, 0=비활성)", value=0, step=10,
+    help="10일 평균거래량 × 종가 근사값",
 )
 st.sidebar.markdown("---")
 search_query = st.sidebar.text_input("🔎 종목명/코드 검색")
@@ -387,13 +388,12 @@ def render_screener():
     filtered = filtered[filtered["latest_close"] >= price_min]
     if price_max > 0:
         filtered = filtered[filtered["latest_close"] <= price_max]
-    if avg_vol_20d_min > 0 and "avg_vol_20d" in filtered.columns:
-        filtered = filtered[filtered["avg_vol_20d"].fillna(0) >= avg_vol_20d_min]
-    if avg_amount_20d_min > 0 and "avg_amount_20d" in filtered.columns:
-        # 사용자 입력: 억원 단위 → 원 단위로 변환 후 비교
-        filtered = filtered[
-            filtered["avg_amount_20d"].fillna(0) >= avg_amount_20d_min * 1e8
-        ]
+    if avg_vol_min > 0 and "avg_vol_10d" in filtered.columns:
+        filtered = filtered[filtered["avg_vol_10d"].fillna(0) >= avg_vol_min]
+    if avg_amount_min > 0 and "avg_vol_10d" in filtered.columns:
+        # 거래대금 근사: avg_vol_10d × latest_close, 억원 단위로 비교
+        approx_amount = filtered["avg_vol_10d"].fillna(0) * filtered["latest_close"].fillna(0)
+        filtered = filtered[approx_amount >= avg_amount_min * 1e8]
     if search_query:
         mask = (
             filtered["ticker"].str.contains(search_query, case=False, na=False)

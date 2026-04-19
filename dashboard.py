@@ -270,7 +270,8 @@ tab_screener, tab_market, tab_watchlist, tab_reports = st.tabs([
 # ==========================================
 # TAB 1 — 스크리너
 # ==========================================
-with tab_screener:
+@st.fragment
+def render_screener():
 
     # ── 사이드바 필터 ──
     st.sidebar.header("🔍 필터 설정")
@@ -938,7 +939,8 @@ with tab_screener:
 # ==========================================
 # TAB 2 — 시장 분석
 # ==========================================
-with tab_market:
+@st.fragment
+def render_market():
     st.subheader("📊 시장 분석")
 
     # ── 섹터 히트맵 ──
@@ -1072,7 +1074,8 @@ with tab_market:
 # ==========================================
 # TAB 3 — 워치리스트
 # ==========================================
-with tab_watchlist:
+@st.fragment
+def render_watchlist():
     st.subheader("⭐ 워치리스트")
 
     wl_list = wl_get()
@@ -1234,7 +1237,8 @@ with tab_watchlist:
 # ==========================================
 # TAB 4 — 보고서
 # ==========================================
-with tab_reports:
+@st.fragment
+def render_reports():
     st.subheader("📄 종목 분석 보고서")
 
     if not all_reports:
@@ -1301,3 +1305,16 @@ with tab_reports:
             st.warning(f"보고서 파일을 찾을 수 없습니다: `{selected_report}`")
         else:
             st.info("위에서 종목 버튼을 클릭하면 보고서가 표시됩니다.")
+
+
+# ==========================================
+# 탭 렌더링 (각 탭을 독립 fragment로 실행)
+# ==========================================
+with tab_screener:
+    render_screener()
+with tab_market:
+    render_market()
+with tab_watchlist:
+    render_watchlist()
+with tab_reports:
+    render_reports()

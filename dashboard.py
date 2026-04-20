@@ -18,6 +18,7 @@ st.set_page_config(
     page_title="KR RS Rating Screener",
     page_icon="📊",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # ── 레이아웃 최소 여백 CSS ──

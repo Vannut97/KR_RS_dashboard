@@ -1297,34 +1297,33 @@ def render_reports():
 
         st.markdown("---")
         if selected_report and os.path.exists(selected_report):
-            ticker_name = os.path.splitext(os.path.basename(selected_report))[0]
-            st.markdown(f"#### {ticker_name_map.get(ticker_name, ticker_name)} 보고서")
+            # 파일명에서 ticker만 추출 (예: "124500_2025_annual_2026-04-20" → "124500")
+            fname_stem = os.path.splitext(os.path.basename(selected_report))[0]
+            ticker_only = fname_stem.split("_")[0]
+            st.markdown(f"#### {ticker_name_map.get(ticker_only, ticker_only)} 보고서")
 
             with open(selected_report, "r", encoding="utf-8") as f:
                 jsx_content = f.read()
 
+            # JSX 파일 내부에 이미 Recharts 구조분해가 있으므로 템플릿에서 제거
             html = f"""<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-  <style>body {{ margin: 0; padding: 0; }}</style>
+  <style>
+    body {{ margin: 0; padding: 16px; background: #ffffff; }}
+    * {{ box-sizing: border-box; }}
+  </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const {{
-      LineChart, BarChart, PieChart, AreaChart, ComposedChart, RadarChart,
-      Line, Bar, Pie, Area, Radar, PolarGrid, PolarAngleAxis,
-      XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-      Cell, ReferenceLine
-    }} = Recharts;
-
     {jsx_content}
 
     const root = ReactDOM.createRoot(document.getElementById('root'));

@@ -346,9 +346,7 @@ if not df_surge.empty:
         )[["ticker","name","rs_delta","ret_1w"]]
         surge_display.columns = ["코드","종목명","RS변화","1W수익률(%)"]
         st.dataframe(
-            surge_display.style.background_gradient(
-                subset=["RS변화"], cmap="Greens"
-            ).format({"RS변화": "+{:.0f}", "1W수익률(%)": "{:.1f}%"}),
+            surge_display.style.format({"RS변화": "+{:.0f}", "1W수익률(%)": "{:.1f}%"}),
             use_container_width=True, hide_index=True,
         )
 

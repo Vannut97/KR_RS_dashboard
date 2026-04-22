@@ -61,66 +61,96 @@ h3 { margin-top: 0.2rem !important; margin-bottom: 0.2rem !important; }
 
 st.markdown("##### 📊 KR RS Rating Screener")
 
-DB_PATH = "quant_dashboard.db"
+# 스크립트 위치 기준 절대경로 (Streamlit Cloud / 로컬 공통 대응)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH  = os.path.join(BASE_DIR, "quant_dashboard.db")
+
+def _resolve_report_path(p: str) -> str:
+    """DB에 저장된 보고서 경로를 실행 환경에 맞게 절대경로로 변환."""
+    if not p:
+        return ""
+    p = p.replace("\\", "/")          # Windows 역슬래시 → 슬래시
+    if os.path.isabs(p):
+        return p
+    return os.path.join(BASE_DIR, p)  # 상대경로 → BASE_DIR 기준 절대경로
 
 # ==========================================
-# Supabase 워치리스트 클라이언트
+# Supabase 워치리스트 — requests REST API
+# (supabase 패키지 불필요, 어느 환경에서도 동작)
 # ==========================================
-def _init_supabase():
-    """Supabase 클라이언트 초기화.
-    Streamlit Cloud → st.secrets, 로컬 → .env 순으로 탐색."""
+import requests as _requests
+
+def _sb_creds():
+    """(url, key) 반환. Streamlit Cloud secrets → 로컬 .env 순으로 탐색."""
     try:
-        from supabase import create_client
-        # Streamlit Cloud secrets 우선
-        try:
-            url = st.secrets["supabase"]["url"]
-            key = st.secrets["supabase"]["key"]
-        except Exception:
-            # 로컬 .env 폴백
-            from dotenv import load_dotenv
-            load_dotenv()
-            url = os.environ.get("SUPABASE_URL", "")
-            key = os.environ.get("SUPABASE_KEY", "")
-        if url and key:
-            return create_client(url, key)
+        return st.secrets["supabase"]["url"], st.secrets["supabase"]["key"]
     except Exception:
         pass
-    return None
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+    return os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_KEY", "")
 
-_sb = _init_supabase()
+
+def _sb_headers(extra: dict | None = None) -> tuple[str, str, dict]:
+    url, key = _sb_creds()
+    h = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    if extra:
+        h.update(extra)
+    return url, key, h
 
 
 def wl_add(ticker: str, note: str = ""):
     """워치리스트 추가 (이미 있으면 무시)."""
-    today = str(_date.today())
-    if _sb:
-        _sb.table("watchlist").upsert(
-            {"ticker": ticker, "added_date": today, "note": note},
-            on_conflict="ticker",          # 이미 있으면 덮어쓰지 않음
-            ignore_duplicates=True,
-        ).execute()
-    else:
+    url, key, headers = _sb_headers({"Prefer": "resolution=ignore-duplicates"})
+    if not url or not key:
         st.error("Supabase 연결 실패: SUPABASE_URL / SUPABASE_KEY 확인 필요")
+        return
+    try:
+        _requests.post(
+            f"{url}/rest/v1/watchlist",
+            json={"ticker": ticker, "added_date": str(_date.today()), "note": note},
+            headers=headers, timeout=10,
+        )
+    except Exception as e:
+        st.error(f"워치리스트 추가 실패: {e}")
 
 
 def wl_remove(ticker: str):
     """워치리스트 제거."""
-    if _sb:
-        _sb.table("watchlist").delete().eq("ticker", ticker).execute()
-    else:
+    url, key, headers = _sb_headers()
+    if not url or not key:
         st.error("Supabase 연결 실패")
+        return
+    try:
+        _requests.delete(
+            f"{url}/rest/v1/watchlist?ticker=eq.{ticker}",
+            headers=headers, timeout=10,
+        )
+    except Exception as e:
+        st.error(f"워치리스트 삭제 실패: {e}")
 
 
 def wl_get() -> list[dict]:
     """워치리스트 전체 반환 [{ticker, added_date, note}, ...]."""
-    if _sb:
-        try:
-            res = _sb.table("watchlist").select("ticker, added_date, note") \
-                      .order("added_date", desc=True).execute()
-            return res.data or []
-        except Exception:
-            return []
-    return []
+    url, key, headers = _sb_headers()
+    if not url or not key:
+        return []
+    try:
+        res = _requests.get(
+            f"{url}/rest/v1/watchlist"
+            "?select=ticker,added_date,note&order=added_date.desc",
+            headers=headers, timeout=10,
+        )
+        return res.json() if res.ok else []
+    except Exception:
+        return []
 
 # ==========================================
 # 데이터 로드 함수
@@ -980,11 +1010,15 @@ def render_screener():
             (_base["ret_1d"].fillna(0).abs() >= 5)   # 5% 이상 움직임 + 거래량 상위
         ].nlargest(10, "_vol_proxy")
 
+    # 급등주에 이미 있는 종목은 거래대금 상위에서 제거 (중복 방지)
+    if not _surge.empty and not _volume.empty:
+        _volume = _volume[~_volume["ticker"].isin(_surge["ticker"])]
+
     has_surge  = not _surge.empty
     has_volume = not _volume.empty
 
     if has_surge or has_volume:
-        with st.expander("⚡ 오늘 특징주", expanded=True):
+        with st.expander(f"⚡ 특징주 ({selected_date})", expanded=True):
             def _cards(df_cards, label_col="ret_1d", label_fmt="{:+.1f}%", badge_color=None):
                 """종목 카드 렌더링."""
                 cols = st.columns(min(len(df_cards), 5))
@@ -1044,7 +1078,7 @@ def render_screener():
                        label_fmt="{:,.0f}주(평균)",
                        badge_color="#7c3aed")
     else:
-        with st.expander("⚡ 오늘 특징주", expanded=False):
+        with st.expander(f"⚡ 특징주 ({selected_date})", expanded=False):
             st.caption(f"기준일({selected_date}) 급등/거래량 폭등 종목이 없습니다.")
 
     # ── CSV 다운로드 ──
@@ -1225,28 +1259,37 @@ def render_watchlist():
                     st.session_state.pop(f"wl_chk_{t}", None)
                 st.rerun()
 
-        # ── RS 데이터 수집 ──
+        # ── RS 데이터 수집 (2회 bulk 쿼리 — N+1 제거) ──
         conn_rs     = sqlite3.connect(DB_PATH)
         tickers_sql = ",".join([f"'{t}'" for t in wl_tickers])
         dates_sql   = ",".join([f"'{d}'" for d in recent_dates])
-        df_rs_hist  = pd.read_sql(f"""
+
+        # ① 최근 N일 히트맵용
+        df_rs_hist = pd.read_sql(f"""
             SELECT ticker, date, rs_rating FROM rs_ratings
             WHERE ticker IN ({tickers_sql}) AND date IN ({dates_sql})
         """, conn_rs)
 
-        def rs_at_added(ticker, added_date):
-            r = pd.read_sql(f"""
-                SELECT rs_rating FROM rs_ratings
-                WHERE ticker='{ticker}' AND date >= '{added_date}'
-                ORDER BY date ASC LIMIT 1
-            """, conn_rs)
-            if r.empty:
-                r = pd.read_sql(f"""
-                    SELECT rs_rating FROM rs_ratings
-                    WHERE ticker='{ticker}' AND date <= '{added_date}'
-                    ORDER BY date DESC LIMIT 1
-                """, conn_rs)
-            return float(r["rs_rating"].iloc[0]) if not r.empty else None
+        # ② 등록 시점 RS 계산용 — 전체 히스토리 1회 로드
+        df_all_hist = pd.read_sql(f"""
+            SELECT ticker, date, rs_rating FROM rs_ratings
+            WHERE ticker IN ({tickers_sql})
+            ORDER BY ticker, date ASC
+        """, conn_rs)
+        conn_rs.close()
+
+        # 등록일 기준 RS 맵 구축 (루프 내 쿼리 완전 제거)
+        added_dates_map  = {w["ticker"]: w["added_date"] for w in wl_list}
+        rs_at_added_map: dict[str, float | None] = {}
+        for t in wl_tickers:
+            added   = added_dates_map.get(t, "")
+            t_df    = df_all_hist[df_all_hist["ticker"] == t]
+            after   = t_df[t_df["date"] >= added]
+            if not after.empty:
+                rs_at_added_map[t] = float(after["rs_rating"].iloc[0])
+            else:
+                before = t_df[t_df["date"] <= added]
+                rs_at_added_map[t] = float(before["rs_rating"].iloc[-1]) if not before.empty else None
 
         # ── HTML 셀 헬퍼 ──
         def rs_cell(val):
@@ -1315,7 +1358,7 @@ def render_watchlist():
                             if "—" in ticker_name_map.get(t, t) else t
                 today_row = df_today[df_today["ticker"] == t]
                 rs_now    = float(today_row["rs_rating"].values[0]) if not today_row.empty else None
-                rs_reg    = rs_at_added(t, added)
+                rs_reg    = rs_at_added_map.get(t)
                 delta     = round(rs_now - rs_reg, 0) if rs_now is not None and rs_reg is not None else None
                 rs_disp   = f"<b>{int(rs_now)}</b>" if rs_now is not None else "—"
 
@@ -1333,7 +1376,7 @@ def render_watchlist():
                     + delta_cell(delta) + daily_cells + "</tr>"
                 )
 
-            conn_rs.close()
+            # conn_rs는 bulk 쿼리 직후 이미 닫혔으므로 여기선 close() 불필요
 
             legend = (
                 "<div style='margin-top:8px;font-size:12px;color:#9ca3af'>"
@@ -1382,13 +1425,14 @@ def render_reports():
                     selected_report = report["report_path"]
 
         st.markdown("---")
-        if selected_report and os.path.exists(selected_report):
+        _report_abs = _resolve_report_path(selected_report) if selected_report else ""
+        if _report_abs and os.path.exists(_report_abs):
             # 파일명에서 ticker만 추출 (예: "124500_2025_annual_2026-04-20" → "124500")
-            fname_stem = os.path.splitext(os.path.basename(selected_report))[0]
+            fname_stem  = os.path.splitext(os.path.basename(_report_abs))[0]
             ticker_only = fname_stem.split("_")[0]
             st.markdown(f"#### {ticker_name_map.get(ticker_only, ticker_only)} 보고서")
 
-            with open(selected_report, "r", encoding="utf-8") as f:
+            with open(_report_abs, "r", encoding="utf-8") as f:
                 jsx_content = f.read()
 
             # JSX 파일 내부에 이미 Recharts 구조분해가 있으므로 템플릿에서 제거
@@ -1415,12 +1459,48 @@ def render_reports():
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<StockReport />);
   </script>
+  <script>
+    /* React 렌더 완료 후 iframe 높이를 실제 콘텐츠에 맞게 자동 조정 */
+    (function() {{
+      function resize() {{
+        var h = Math.max(
+          document.body.scrollHeight,
+          document.documentElement.scrollHeight
+        );
+        /* 같은 origin이면 frameElement로 직접 조정 */
+        try {{
+          if (window.frameElement) {{
+            window.frameElement.style.height = h + 'px';
+          }}
+        }} catch(e) {{}}
+        /* Streamlit custom component 프로토콜 (fallback) */
+        window.parent.postMessage({{
+          isStreamlitMessage: true,
+          type: 'streamlit:setFrameHeight',
+          height: h
+        }}, '*');
+      }}
+      /* React가 DOM을 완성한 뒤 측정 */
+      var observer = new MutationObserver(function() {{ resize(); }});
+      setTimeout(function() {{
+        var root = document.getElementById('root');
+        if (root && root.children.length) {{
+          observer.observe(root, {{ childList: true, subtree: false }});
+        }}
+        resize();
+      }}, 400);
+      setTimeout(resize, 1500);
+      setTimeout(resize, 3500);
+    }})();
+  </script>
 </body>
 </html>"""
-            components.html(html, height=6000, scrolling=True)
+            # 초기 높이: JSX 줄 수 기반 추정 (평균 6px/줄, 하한 4000 · 상한 12000)
+            _est_h = max(4000, min(jsx_content.count('\n') * 6, 12000))
+            components.html(html, height=_est_h, scrolling=True)
 
         elif selected_report:
-            st.warning(f"보고서 파일을 찾을 수 없습니다: `{selected_report}`")
+            st.warning(f"보고서 파일을 찾을 수 없습니다: `{_report_abs}`")
         else:
             st.info("위에서 종목 버튼을 클릭하면 보고서가 표시됩니다.")
 

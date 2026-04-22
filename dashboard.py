@@ -1112,15 +1112,15 @@ def render_market():
     # ══════════════════════════════════════════
     st.markdown("### 🏷️ Top 200 종목 섹터 입력")
     st.caption(
-        "RS 상위 200 종목에 섹터를 직접 입력할 수 있습니다.  "
-        "입력 후 **💾 저장** 버튼을 누르면 DB에 기록되며, "
+        "RS 상위 200 종목에 섹터를 직접 입력하세요.  "
+        "셀을 수정하고 **Enter** 또는 **Tab** 으로 확정하면 자동으로 DB에 저장됩니다.  "
         "기준일이 바뀌어도 동일 종목의 섹터는 자동으로 불러옵니다."
     )
 
     # ── Top-200 기본 데이터 ──
-    df_today = df[df["date"] == selected_date].copy()
+    df_today_top = df[df["date"] == selected_date].copy()
     df_top200 = (
-        df_today
+        df_today_top
         .dropna(subset=["rs_rating"])
         .nlargest(200, "rs_rating")
         [["ticker", "name", "market", "rs_rating", "latest_close", "market_cap"]]
@@ -1128,7 +1128,7 @@ def render_market():
     )
     df_top200["기준일"] = selected_date
 
-    # ── 기존 섹터 값 이월 ──
+    # ── 기존 섹터 값 이월 (DB → 표) ──
     sector_map = load_sector_map()
     df_top200["섹터"] = df_top200["ticker"].map(sector_map).fillna("")
 
@@ -1154,9 +1154,9 @@ def render_market():
             "종가":     st.column_config.NumberColumn("종가",    width="small",  disabled=True, format="₩%,.0f"),
             "시총(억)": st.column_config.NumberColumn("시총(억)",width="small",  disabled=True, format="%,.0f"),
             "섹터":     st.column_config.TextColumn(
-                            "섹터 (직접 입력)",
+                            "섹터 ✏️",
                             width="large",
-                            help="섹터명을 자유롭게 입력하세요. 저장 시 이 종목의 섹터가 전체 날짜에 반영됩니다.",
+                            help="섹터명을 자유롭게 입력 → Enter/Tab으로 확정하면 자동저장됩니다.",
                         ),
         },
         hide_index=True,
@@ -1165,27 +1165,16 @@ def render_market():
         key="sector_editor",
     )
 
-    # ── 저장 버튼 ──
-    sv_col, info_col = st.columns([1, 5])
-    with sv_col:
-        save_clicked = st.button("💾 저장", use_container_width=True, type="primary")
-    if save_clicked:
-        # 변경된 종목만 추출
-        original_sectors = df_top200.set_index("ticker")["섹터"].to_dict()
-        new_sectors      = dict(zip(df_top200["ticker"], edited["섹터"]))
-        changes = {
-            t: s for t, s in new_sectors.items()
-            if s != original_sectors.get(t, "")
-        }
-        if changes:
-            upsert_ticker_sectors(changes, db_name=DB_PATH)
-            load_sector_map.clear()   # 캐시 즉시 무효화
-            with info_col:
-                st.success(f"✅ {len(changes)}개 종목 섹터 저장 완료", icon="💾")
-            st.rerun()
-        else:
-            with info_col:
-                st.info("변경된 섹터가 없습니다.")
+    # ── 자동 저장: 편집 확정 시 즉시 DB 반영 ──
+    # data_editor가 변경을 감지하면 fragment가 rerun되므로,
+    # 이 시점에 원본과 비교해 변경분을 즉시 저장한다.
+    _orig = df_top200.set_index("ticker")["섹터"].to_dict()
+    _new  = dict(zip(df_top200["ticker"], edited["섹터"]))
+    _changes = {t: s for t, s in _new.items() if s != _orig.get(t, "")}
+    if _changes:
+        upsert_ticker_sectors(_changes, db_name=DB_PATH)
+        load_sector_map.clear()          # 캐시 무효화 → 다음 렌더에 DB 값 반영
+        st.toast(f"💾 {len(_changes)}개 섹터 저장됨")
 
     st.markdown("---")
 

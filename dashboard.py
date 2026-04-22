@@ -959,6 +959,91 @@ def render_screener():
         else:
             st.info("스크리너 결과에서 종목을 먼저 필터링하세요.")
 
+    # ── 오늘 특징주 ──
+    st.markdown("---")
+    _base = df[df["date"] == selected_date].copy() if "date" in df.columns else df.copy()
+
+    _surge  = pd.DataFrame()   # 급등
+    _volume = pd.DataFrame()   # 거래량 폭등
+
+    if "ret_1d" in _base.columns:
+        _surge = _base[_base["ret_1d"].fillna(0) >= 10].copy()
+        _surge = _surge.sort_values("ret_1d", ascending=False).head(10)
+
+    if "avg_vol_10d" in _base.columns and "ret_1d" in _base.columns:
+        # 당일 거래량 추정: avg_vol_10d는 10일 평균. 당일 거래량은 DB에 없으므로
+        # ret_1d와 avg_vol_10d의 조합으로 유추 불가 — 단, 거래대금 급증 proxy로
+        # ret_1d × avg_vol_10d 상위를 volume spike로 표시
+        _base["_vol_proxy"] = _base["ret_1d"].abs().fillna(0) * _base["avg_vol_10d"].fillna(0)
+        _volume = _base[
+            (_base["avg_vol_10d"].fillna(0) > 0) &
+            (_base["ret_1d"].fillna(0).abs() >= 5)   # 5% 이상 움직임 + 거래량 상위
+        ].nlargest(10, "_vol_proxy")
+
+    has_surge  = not _surge.empty
+    has_volume = not _volume.empty
+
+    if has_surge or has_volume:
+        with st.expander("⚡ 오늘 특징주", expanded=True):
+            def _cards(df_cards, label_col="ret_1d", label_fmt="{:+.1f}%", badge_color=None):
+                """종목 카드 렌더링."""
+                cols = st.columns(min(len(df_cards), 5))
+                for i, (_, row) in enumerate(df_cards.iterrows()):
+                    ticker = row.get("ticker", "")
+                    name   = ticker_name_map.get(ticker, ticker)
+                    price  = row.get("latest_close", 0)
+                    ret1d  = row.get("ret_1d", None)
+                    rs     = row.get("rs_rating", None)
+                    val    = row.get(label_col, None)
+                    mkt    = row.get("market", "")
+
+                    ret_color  = "#16a34a" if (ret1d or 0) >= 0 else "#dc2626"
+                    badge_bg   = badge_color or ("#16a34a" if (ret1d or 0) >= 0 else "#dc2626")
+                    val_str    = label_fmt.format(val) if val is not None else "N/A"
+                    price_str  = f"₩{int(price):,}" if price else "-"
+                    rs_str     = f"RS {int(rs)}" if rs is not None else ""
+                    ret_str    = f"{ret1d:+.1f}%" if ret1d is not None else ""
+                    mkt_badge  = "🟦" if mkt == "KOSPI" else "🟩"
+
+                    with cols[i % 5]:
+                        st.markdown(f"""
+<div style="
+    background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
+    padding:12px 14px;margin-bottom:8px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.06);
+    border-left:4px solid {badge_bg};
+">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <span style="font-size:11px;color:#64748b;">{mkt_badge} {ticker}</span>
+    <span style="font-size:11px;color:#64748b;">{rs_str}</span>
+  </div>
+  <div style="font-weight:700;font-size:13px;color:#1e293b;margin-bottom:6px;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+       title="{name}">{name}</div>
+  <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:4px;">{price_str}</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-size:13px;font-weight:700;color:{ret_color};">{ret_str}</span>
+    <span style="
+        background:{badge_bg};color:#fff;
+        font-size:11px;font-weight:700;padding:2px 7px;border-radius:12px;
+    ">{val_str}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+            if has_surge:
+                st.markdown("**🚀 급등주** — 당일 +10% 이상")
+                _cards(_surge, label_col="ret_1d", label_fmt="{:+.1f}%", badge_color="#16a34a")
+
+            if has_volume:
+                st.markdown("**📊 거래대금 상위** — 당일 변동 5%↑ + 추정 거래대금 상위")
+                st.caption("※ 당일 실거래량이 DB에 없어 10일 평균거래량 × 현재가로 추정합니다.")
+                _cards(_volume, label_col="avg_vol_10d",
+                       label_fmt="{:,.0f}주(평균)",
+                       badge_color="#7c3aed")
+    else:
+        with st.expander("⚡ 오늘 특징주", expanded=False):
+            st.caption(f"기준일({selected_date}) 급등/거래량 폭등 종목이 없습니다.")
+
     # ── CSV 다운로드 ──
     st.markdown("---")
     if not df_display.empty:

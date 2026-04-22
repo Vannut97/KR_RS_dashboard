@@ -1124,6 +1124,19 @@ def render_market():
 
     # ── 기존 섹터 값 이월 (DB → 표) ──
     sector_map = load_sector_map()
+
+    # ── 낙관적 업데이트: session_state의 text_input 값을 미리 sector_map에 반영 ──
+    # text_input 변경 → fragment rerun 시, DB 저장 전이라도 테이블에 즉시 반영
+    ticker_list   = df_top200["ticker"].tolist()
+    _cur_idx      = st.session_state.get("sector_ticker_sel", 0)
+    _cur_idx      = min(int(_cur_idx), len(ticker_list) - 1) if ticker_list else 0
+    _cur_ticker   = ticker_list[_cur_idx] if ticker_list else None
+    if _cur_ticker:
+        _input_key = f"sector_input_{_cur_ticker}"
+        _pending   = st.session_state.get(_input_key)
+        if isinstance(_pending, str) and _pending != sector_map.get(_cur_ticker, ""):
+            sector_map = {**sector_map, _cur_ticker: _pending}
+
     df_top200["섹터"] = df_top200["ticker"].map(sector_map).fillna("")
 
     # ── 왼쪽: 종목 테이블 / 오른쪽: 섹터 편집 패널 ──
@@ -1148,12 +1161,10 @@ def render_market():
     with col_edit:
         st.caption("종목을 선택한 뒤 섹터를 입력하고 **Enter**를 누르세요.")
 
-        # 종목 선택 드롭다운
         ticker_labels = [
             f"{row['ticker']}  {row['name']}"
             for _, row in df_top200.iterrows()
         ]
-        ticker_list = df_top200["ticker"].tolist()
 
         sel_idx = st.selectbox(
             "종목 선택",
@@ -1163,9 +1174,9 @@ def render_market():
             label_visibility="collapsed",
         )
         sel_ticker = ticker_list[sel_idx]
-        cur_sector = sector_map.get(sel_ticker, "")
+        cur_sector = load_sector_map().get(sel_ticker, "")   # DB 원본값 기준
 
-        # 섹터 텍스트 입력 (st.text_input → 한글 IME 정상 동작)
+        # 섹터 텍스트 입력 (한글 IME 정상 동작)
         new_sector = st.text_input(
             "섹터",
             value=cur_sector,
@@ -1173,12 +1184,11 @@ def render_market():
             placeholder="예: 반도체, 바이오, 2차전지 ...",
         )
 
-        # 값이 바뀌었으면 즉시 저장
+        # 값이 바뀌었으면 즉시 저장 (st.rerun() 없음 — 낙관적 업데이트로 대체)
         if new_sector != cur_sector:
             upsert_ticker_sectors({sel_ticker: new_sector}, db_name=DB_PATH)
             load_sector_map.clear()
-            st.toast(f"💾 {sel_ticker} 섹터 저장됨")
-            st.rerun()
+            st.toast(f"💾 저장됨")
 
         # ── 현재 입력된 섹터 전체 현황 ──
         if sector_map:

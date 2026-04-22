@@ -8,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from db_sqlite import (
     get_all_report_tickers, get_all_reports,
+    get_ticker_sectors, upsert_ticker_sectors,
 )
 from datetime import date as _date
 
@@ -206,6 +207,12 @@ def load_universe():
     if "name"   not in df.columns: df["name"]   = df["ticker"]
     if "market" not in df.columns: df["market"] = ""
     return df
+
+
+@st.cache_data(ttl=60)
+def load_sector_map():
+    """사용자 입력 섹터 맵 반환 {ticker: sector}. 저장 직후 .clear()로 무효화."""
+    return get_ticker_sectors(DB_PATH)
 
 
 @st.cache_data(ttl=300)
@@ -1100,12 +1107,105 @@ def render_screener():
 def render_market():
     st.subheader("📊 시장 분석")
 
+    # ══════════════════════════════════════════
+    # 섹터 입력 테이블 (Top 200 · 사용자 직접 입력)
+    # ══════════════════════════════════════════
+    st.markdown("### 🏷️ Top 200 종목 섹터 입력")
+    st.caption(
+        "RS 상위 200 종목에 섹터를 직접 입력할 수 있습니다.  "
+        "입력 후 **💾 저장** 버튼을 누르면 DB에 기록되며, "
+        "기준일이 바뀌어도 동일 종목의 섹터는 자동으로 불러옵니다."
+    )
+
+    # ── Top-200 기본 데이터 ──
+    df_today = df[df["date"] == selected_date].copy()
+    df_top200 = (
+        df_today
+        .dropna(subset=["rs_rating"])
+        .nlargest(200, "rs_rating")
+        [["ticker", "name", "market", "rs_rating", "latest_close", "market_cap"]]
+        .reset_index(drop=True)
+    )
+    df_top200["기준일"] = selected_date
+
+    # ── 기존 섹터 값 이월 ──
+    sector_map = load_sector_map()
+    df_top200["섹터"] = df_top200["ticker"].map(sector_map).fillna("")
+
+    # ── 표시용 DataFrame ──
+    editor_df = df_top200[[
+        "기준일", "ticker", "name", "market",
+        "rs_rating", "latest_close", "market_cap", "섹터",
+    ]].copy()
+    editor_df.columns = [
+        "기준일", "코드", "종목명", "시장",
+        "RS", "종가", "시총(억)", "섹터",
+    ]
+
+    # ── 편집기 ──
+    edited = st.data_editor(
+        editor_df,
+        column_config={
+            "기준일":   st.column_config.TextColumn("기준일",    width="small",  disabled=True),
+            "코드":     st.column_config.TextColumn("코드",      width="small",  disabled=True),
+            "종목명":   st.column_config.TextColumn("종목명",    width="medium", disabled=True),
+            "시장":     st.column_config.TextColumn("시장",      width="small",  disabled=True),
+            "RS":       st.column_config.NumberColumn("RS",      width="small",  disabled=True, format="%d"),
+            "종가":     st.column_config.NumberColumn("종가",    width="small",  disabled=True, format="₩%,.0f"),
+            "시총(억)": st.column_config.NumberColumn("시총(억)",width="small",  disabled=True, format="%,.0f"),
+            "섹터":     st.column_config.TextColumn(
+                            "섹터 (직접 입력)",
+                            width="large",
+                            help="섹터명을 자유롭게 입력하세요. 저장 시 이 종목의 섹터가 전체 날짜에 반영됩니다.",
+                        ),
+        },
+        hide_index=True,
+        use_container_width=True,
+        height=420,
+        key="sector_editor",
+    )
+
+    # ── 저장 버튼 ──
+    sv_col, info_col = st.columns([1, 5])
+    with sv_col:
+        save_clicked = st.button("💾 저장", use_container_width=True, type="primary")
+    if save_clicked:
+        # 변경된 종목만 추출
+        original_sectors = df_top200.set_index("ticker")["섹터"].to_dict()
+        new_sectors      = dict(zip(df_top200["ticker"], edited["섹터"]))
+        changes = {
+            t: s for t, s in new_sectors.items()
+            if s != original_sectors.get(t, "")
+        }
+        if changes:
+            upsert_ticker_sectors(changes, db_name=DB_PATH)
+            load_sector_map.clear()   # 캐시 즉시 무효화
+            with info_col:
+                st.success(f"✅ {len(changes)}개 종목 섹터 저장 완료", icon="💾")
+            st.rerun()
+        else:
+            with info_col:
+                st.info("변경된 섹터가 없습니다.")
+
+    st.markdown("---")
+
     # ── 섹터 히트맵 ──
     st.markdown("### 🗺️ 섹터별 RS Rating 현황")
 
     df_today = df[df["date"] == selected_date].copy()
 
-    if has_sector and df_today["sector"].notna().any():
+    # 사용자 입력 섹터를 우선 적용 (FDR 섹터보다 우선)
+    _sm = load_sector_map()
+    if _sm:
+        df_today["_user_sector"] = df_today["ticker"].map(_sm)
+        if "sector" in df_today.columns:
+            df_today["sector"] = df_today["_user_sector"].combine_first(df_today["sector"])
+        else:
+            df_today["sector"] = df_today["_user_sector"]
+
+    _has_any_sector = df_today["sector"].notna().any() if "sector" in df_today.columns else False
+
+    if _has_any_sector:
         df_sec = (
             df_today[df_today["sector"].notna() & (df_today["sector"] != "")]
             .groupby("sector", as_index=False)
@@ -1175,7 +1275,7 @@ def render_market():
                 use_container_width=True, hide_index=True,
             )
     else:
-        st.info("섹터 데이터가 없거나 FDR StockListing의 Sector 컬럼을 확인할 수 없습니다.")
+        st.info("섹터 히트맵: 위 표에서 섹터를 입력하고 저장하면 자동으로 표시됩니다.")
 
     # ── RS 시계열 조회 ──
     st.markdown("---")

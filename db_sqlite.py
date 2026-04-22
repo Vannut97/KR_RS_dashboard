@@ -432,6 +432,54 @@ def get_all_reports(db_name="quant_dashboard.db"):
 
 
 # ==========================================
+# 종목 섹터 (사용자 직접 입력)
+# ==========================================
+def get_ticker_sectors(db_name="quant_dashboard.db"):
+    """사용자가 입력한 종목별 섹터를 {ticker: sector} dict로 반환."""
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ticker_sectors'"
+    )
+    if not cursor.fetchone():
+        conn.close()
+        return {}
+    cursor.execute("SELECT ticker, sector FROM ticker_sectors")
+    result = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return result
+
+
+def upsert_ticker_sectors(updates: dict, db_name="quant_dashboard.db"):
+    """종목 섹터를 저장/업데이트한다.
+
+    Args:
+        updates: {ticker: sector_str} — 변경된 항목만 전달해도 되고 전체 전달해도 됨
+        db_name: DB 파일 경로
+    """
+    if not updates:
+        return
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ticker_sectors (
+        ticker     TEXT PRIMARY KEY,
+        sector     TEXT,
+        updated_at TEXT
+    )
+    ''')
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for ticker, sector in updates.items():
+        cursor.execute(
+            "INSERT OR REPLACE INTO ticker_sectors (ticker, sector, updated_at)"
+            " VALUES (?, ?, ?)",
+            (ticker, sector or "", now),
+        )
+    conn.commit()
+    conn.close()
+
+
+# ==========================================
 # 메인 파이프라인
 # ==========================================
 if __name__ == "__main__":

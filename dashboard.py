@@ -1111,11 +1111,6 @@ def render_market():
     # 섹터 입력 테이블 (Top 200 · 사용자 직접 입력)
     # ══════════════════════════════════════════
     st.markdown("### 🏷️ Top 200 종목 섹터 입력")
-    st.caption(
-        "RS 상위 200 종목에 섹터를 직접 입력하세요.  "
-        "셀을 수정하고 **Enter** 또는 **Tab** 으로 확정하면 자동으로 DB에 저장됩니다.  "
-        "기준일이 바뀌어도 동일 종목의 섹터는 자동으로 불러옵니다."
-    )
 
     # ── Top-200 기본 데이터 ──
     df_today_top = df[df["date"] == selected_date].copy()
@@ -1126,55 +1121,81 @@ def render_market():
         [["ticker", "name", "market", "rs_rating", "latest_close", "market_cap"]]
         .reset_index(drop=True)
     )
-    df_top200["기준일"] = selected_date
 
     # ── 기존 섹터 값 이월 (DB → 표) ──
     sector_map = load_sector_map()
     df_top200["섹터"] = df_top200["ticker"].map(sector_map).fillna("")
 
-    # ── 표시용 DataFrame ──
-    editor_df = df_top200[[
-        "기준일", "ticker", "name", "market",
-        "rs_rating", "latest_close", "market_cap", "섹터",
-    ]].copy()
-    editor_df.columns = [
-        "기준일", "코드", "종목명", "시장",
-        "RS", "종가", "시총(억)", "섹터",
-    ]
+    # ── 왼쪽: 종목 테이블 / 오른쪽: 섹터 편집 패널 ──
+    col_tbl, col_edit = st.columns([3, 2])
 
-    # ── 편집기 ──
-    edited = st.data_editor(
-        editor_df,
-        column_config={
-            "기준일":   st.column_config.TextColumn("기준일",    width="small",  disabled=True),
-            "코드":     st.column_config.TextColumn("코드",      width="small",  disabled=True),
-            "종목명":   st.column_config.TextColumn("종목명",    width="medium", disabled=True),
-            "시장":     st.column_config.TextColumn("시장",      width="small",  disabled=True),
-            "RS":       st.column_config.NumberColumn("RS",      width="small",  disabled=True, format="%d"),
-            "종가":     st.column_config.NumberColumn("종가",    width="small",  disabled=True, format="₩%,.0f"),
-            "시총(억)": st.column_config.NumberColumn("시총(억)",width="small",  disabled=True, format="%,.0f"),
-            "섹터":     st.column_config.TextColumn(
-                            "섹터 ✏️",
-                            width="large",
-                            help="섹터명을 자유롭게 입력 → Enter/Tab으로 확정하면 자동저장됩니다.",
-                        ),
-        },
-        hide_index=True,
-        use_container_width=True,
-        height=420,
-        key="sector_editor",
-    )
+    with col_tbl:
+        st.caption("RS 순으로 정렬된 Top 200 종목 — 오른쪽에서 종목을 선택해 섹터를 입력하세요.")
+        display_df = df_top200[[
+            "ticker", "name", "market", "rs_rating", "섹터"
+        ]].copy()
+        display_df.columns = ["코드", "종목명", "시장", "RS", "섹터"]
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            height=480,
+            column_config={
+                "RS": st.column_config.NumberColumn("RS", format="%d"),
+            },
+        )
 
-    # ── 자동 저장: 편집 확정 시 즉시 DB 반영 ──
-    # data_editor가 변경을 감지하면 fragment가 rerun되므로,
-    # 이 시점에 원본과 비교해 변경분을 즉시 저장한다.
-    _orig = df_top200.set_index("ticker")["섹터"].to_dict()
-    _new  = dict(zip(df_top200["ticker"], edited["섹터"]))
-    _changes = {t: s for t, s in _new.items() if s != _orig.get(t, "")}
-    if _changes:
-        upsert_ticker_sectors(_changes, db_name=DB_PATH)
-        load_sector_map.clear()          # 캐시 무효화 → 다음 렌더에 DB 값 반영
-        st.toast(f"💾 {len(_changes)}개 섹터 저장됨")
+    with col_edit:
+        st.caption("종목을 선택한 뒤 섹터를 입력하고 **Enter**를 누르세요.")
+
+        # 종목 선택 드롭다운
+        ticker_labels = [
+            f"{row['ticker']}  {row['name']}"
+            for _, row in df_top200.iterrows()
+        ]
+        ticker_list = df_top200["ticker"].tolist()
+
+        sel_idx = st.selectbox(
+            "종목 선택",
+            options=range(len(ticker_list)),
+            format_func=lambda i: ticker_labels[i],
+            key="sector_ticker_sel",
+            label_visibility="collapsed",
+        )
+        sel_ticker = ticker_list[sel_idx]
+        cur_sector = sector_map.get(sel_ticker, "")
+
+        # 섹터 텍스트 입력 (st.text_input → 한글 IME 정상 동작)
+        new_sector = st.text_input(
+            "섹터",
+            value=cur_sector,
+            key=f"sector_input_{sel_ticker}",
+            placeholder="예: 반도체, 바이오, 2차전지 ...",
+        )
+
+        # 값이 바뀌었으면 즉시 저장
+        if new_sector != cur_sector:
+            upsert_ticker_sectors({sel_ticker: new_sector}, db_name=DB_PATH)
+            load_sector_map.clear()
+            st.toast(f"💾 {sel_ticker} 섹터 저장됨")
+            st.rerun()
+
+        # ── 현재 입력된 섹터 전체 현황 ──
+        if sector_map:
+            st.markdown("---")
+            st.markdown("**저장된 섹터 목록**")
+            saved_df = (
+                df_top200[df_top200["섹터"] != ""][["ticker", "name", "섹터"]]
+                .copy()
+            )
+            if not saved_df.empty:
+                saved_df.columns = ["코드", "종목명", "섹터"]
+                st.dataframe(
+                    saved_df, use_container_width=True,
+                    hide_index=True, height=280,
+                )
+            else:
+                st.info("아직 입력된 섹터가 없습니다.")
 
     st.markdown("---")
 

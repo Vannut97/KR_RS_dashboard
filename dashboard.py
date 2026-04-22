@@ -997,12 +997,15 @@ def render_screener():
                     val    = row.get(label_col, None)
                     mkt    = row.get("market", "")
 
-                    ret_color  = "#16a34a" if (ret1d or 0) >= 0 else "#dc2626"
-                    badge_bg   = badge_color or ("#16a34a" if (ret1d or 0) >= 0 else "#dc2626")
-                    val_str    = label_fmt.format(val) if val is not None else "N/A"
-                    price_str  = f"₩{int(price):,}" if price else "-"
-                    rs_str     = f"RS {int(rs)}" if rs is not None else ""
-                    ret_str    = f"{ret1d:+.1f}%" if ret1d is not None else ""
+                    _ret1d_v   = ret1d if (ret1d is not None and not pd.isna(ret1d)) else 0
+                    _val_v     = val   if (val   is not None and not pd.isna(val))   else None
+                    _price_v   = price if (price is not None and not pd.isna(price)) else None
+                    ret_color  = "#16a34a" if _ret1d_v >= 0 else "#dc2626"
+                    badge_bg   = badge_color or ("#16a34a" if _ret1d_v >= 0 else "#dc2626")
+                    val_str    = label_fmt.format(_val_v) if _val_v is not None else "N/A"
+                    price_str  = f"₩{int(_price_v):,}" if _price_v else "-"
+                    rs_str     = f"RS {int(rs)}" if (rs is not None and not pd.isna(rs)) else ""
+                    ret_str    = f"{ret1d:+.1f}%" if (ret1d is not None and not pd.isna(ret1d)) else ""
                     mkt_badge  = "🟦" if mkt == "KOSPI" else "🟩"
 
                     with cols[i % 5]:

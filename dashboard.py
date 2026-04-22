@@ -118,6 +118,7 @@ def wl_add(ticker: str, note: str = ""):
             json={"ticker": ticker, "added_date": str(_date.today()), "note": note},
             headers=headers, timeout=10,
         )
+        wl_get.clear()   # 캐시 무효화
     except Exception as e:
         st.error(f"워치리스트 추가 실패: {e}")
 
@@ -133,12 +134,15 @@ def wl_remove(ticker: str):
             f"{url}/rest/v1/watchlist?ticker=eq.{ticker}",
             headers=headers, timeout=10,
         )
+        wl_get.clear()   # 캐시 무효화
     except Exception as e:
         st.error(f"워치리스트 삭제 실패: {e}")
 
 
+@st.cache_data(ttl=15)
 def wl_get() -> list[dict]:
-    """워치리스트 전체 반환 [{ticker, added_date, note}, ...]."""
+    """워치리스트 전체 반환 [{ticker, added_date, note}, ...].
+    15초 캐시 적용 — 추가/삭제 직후엔 wl_get.clear()로 즉시 무효화."""
     url, key, headers = _sb_headers()
     if not url or not key:
         return []

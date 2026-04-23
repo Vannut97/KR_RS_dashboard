@@ -8,7 +8,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from db_sqlite import (
     get_all_report_tickers, get_all_reports,
-    get_ticker_sectors, upsert_ticker_sectors,
 )
 from datetime import date as _date
 
@@ -210,9 +209,39 @@ def load_universe():
 
 
 @st.cache_data(ttl=60)
-def load_sector_map():
-    """사용자 입력 섹터 맵 반환 {ticker: sector}. 저장 직후 .clear()로 무효화."""
-    return get_ticker_sectors(DB_PATH)
+def sector_get() -> dict:
+    """섹터 맵 {ticker: sector} 반환 (Supabase). 60초 캐시."""
+    url, key, headers = _sb_headers()
+    if not url or not key:
+        return {}
+    try:
+        res = _requests.get(
+            f"{url}/rest/v1/ticker_sectors?select=ticker,sector",
+            headers=headers, timeout=10,
+        )
+        if res.ok:
+            return {row["ticker"]: row["sector"] for row in res.json() if row.get("sector")}
+        return {}
+    except Exception:
+        return {}
+
+
+def sector_upsert(ticker: str, sector: str):
+    """섹터 저장/업데이트 (Supabase). 저장 후 캐시 즉시 무효화."""
+    url, key, headers = _sb_headers({"Prefer": "resolution=merge-duplicates"})
+    if not url or not key:
+        st.error("Supabase 연결 실패")
+        return
+    try:
+        _requests.post(
+            f"{url}/rest/v1/ticker_sectors",
+            json={"ticker": ticker, "sector": sector,
+                  "updated_at": str(_date.today())},
+            headers=headers, timeout=10,
+        )
+        sector_get.clear()   # 캐시 무효화
+    except Exception as e:
+        st.error(f"섹터 저장 실패: {e}")
 
 
 @st.cache_data(ttl=300)
@@ -1123,7 +1152,7 @@ def render_market():
     )
 
     # ── 기존 섹터 값 이월 (DB → 표) ──
-    sector_map = load_sector_map()
+    sector_map = sector_get()
 
     # ── 낙관적 업데이트: session_state의 text_input 값을 미리 sector_map에 반영 ──
     # text_input 변경 → fragment rerun 시, DB 저장 전이라도 테이블에 즉시 반영
@@ -1174,7 +1203,7 @@ def render_market():
             label_visibility="collapsed",
         )
         sel_ticker = ticker_list[sel_idx]
-        cur_sector = load_sector_map().get(sel_ticker, "")   # DB 원본값 기준
+        cur_sector = sector_get().get(sel_ticker, "")   # DB 원본값 기준
 
         # 섹터 텍스트 입력 (한글 IME 정상 동작)
         new_sector = st.text_input(
@@ -1186,8 +1215,8 @@ def render_market():
 
         # 값이 바뀌었으면 즉시 저장 (st.rerun() 없음 — 낙관적 업데이트로 대체)
         if new_sector != cur_sector:
-            upsert_ticker_sectors({sel_ticker: new_sector}, db_name=DB_PATH)
-            load_sector_map.clear()
+            sector_upsert(sel_ticker, new_sector)
+            # sector_get.clear()는 sector_upsert() 내부에서 호출됨
             st.toast(f"💾 저장됨")
 
         # ── 현재 입력된 섹터 전체 현황 ──
@@ -1215,7 +1244,7 @@ def render_market():
     df_today = df[df["date"] == selected_date].copy()
 
     # 사용자 입력 섹터를 우선 적용 (FDR 섹터보다 우선)
-    _sm = load_sector_map()
+    _sm = sector_get()
     if _sm:
         df_today["_user_sector"] = df_today["ticker"].map(_sm)
         if "sector" in df_today.columns:

@@ -210,24 +210,31 @@ def load_universe():
 
 @st.cache_data(ttl=60)
 def sector_get() -> dict:
-    """섹터 맵 {ticker: sector} 반환 (Supabase). 60초 캐시."""
+    """섹터/메모 맵 {ticker: {"sector": str, "memo": str}} 반환 (Supabase). 60초 캐시."""
     url, key, headers = _sb_headers()
     if not url or not key:
         return {}
     try:
         res = _requests.get(
-            f"{url}/rest/v1/ticker_sectors?select=ticker,sector",
+            f"{url}/rest/v1/ticker_sectors?select=ticker,sector,memo",
             headers=headers, timeout=10,
         )
         if res.ok:
-            return {row["ticker"]: row["sector"] for row in res.json() if row.get("sector")}
+            return {
+                row["ticker"]: {
+                    "sector": row.get("sector") or "",
+                    "memo":   row.get("memo")   or "",
+                }
+                for row in res.json()
+                if row.get("sector") or row.get("memo")
+            }
         return {}
     except Exception:
         return {}
 
 
-def sector_upsert(ticker: str, sector: str):
-    """섹터 저장/업데이트 (Supabase). 저장 후 캐시 즉시 무효화."""
+def sector_upsert(ticker: str, sector: str, memo: str = ""):
+    """섹터·메모 저장/업데이트 (Supabase). 저장 후 캐시 즉시 무효화."""
     url, key, headers = _sb_headers({"Prefer": "resolution=merge-duplicates"})
     if not url or not key:
         st.error("Supabase 연결 실패")
@@ -235,13 +242,13 @@ def sector_upsert(ticker: str, sector: str):
     try:
         _requests.post(
             f"{url}/rest/v1/ticker_sectors",
-            json={"ticker": ticker, "sector": sector,
+            json={"ticker": ticker, "sector": sector, "memo": memo,
                   "updated_at": str(_date.today())},
             headers=headers, timeout=10,
         )
         sector_get.clear()   # 캐시 무효화
     except Exception as e:
-        st.error(f"섹터 저장 실패: {e}")
+        st.error(f"섹터/메모 저장 실패: {e}")
 
 
 @st.cache_data(ttl=300)
@@ -1341,50 +1348,50 @@ def render_market():
         .reset_index(drop=True)
     )
 
-    # ── 기존 섹터 값 이월 (DB → 표) ──
+    # ── 기존 섹터/메모 값 이월 (Supabase → 표) ──
+    # sector_map: {ticker: {"sector": str, "memo": str}}
     sector_map = sector_get()
 
-    # ── 낙관적 업데이트: session_state의 text_input 값을 미리 sector_map에 반영 ──
-    # text_input 변경 → fragment rerun 시, DB 저장 전이라도 테이블에 즉시 반영
-    ticker_list   = df_top200["ticker"].tolist()
-    _cur_idx      = st.session_state.get("sector_ticker_sel", 0)
-    _cur_idx      = min(int(_cur_idx), len(ticker_list) - 1) if ticker_list else 0
-    _cur_ticker   = ticker_list[_cur_idx] if ticker_list else None
+    # ── 낙관적 업데이트: 아직 저장 전이라도 테이블에 즉시 반영 ──
+    ticker_list = df_top200["ticker"].tolist()
+    _cur_idx    = st.session_state.get("sector_ticker_sel", 0)
+    _cur_idx    = min(int(_cur_idx), len(ticker_list) - 1) if ticker_list else 0
+    _cur_ticker = ticker_list[_cur_idx] if ticker_list else None
     if _cur_ticker:
-        _input_key = f"sector_input_{_cur_ticker}"
-        _pending   = st.session_state.get(_input_key)
-        if isinstance(_pending, str) and _pending != sector_map.get(_cur_ticker, ""):
-            sector_map = {**sector_map, _cur_ticker: _pending}
+        _cur_data       = sector_map.get(_cur_ticker, {"sector": "", "memo": ""})
+        _pending_sector = st.session_state.get(f"sector_input_{_cur_ticker}")
+        _pending_memo   = st.session_state.get(f"memo_input_{_cur_ticker}")
+        _updated        = dict(_cur_data)
+        if isinstance(_pending_sector, str) and _pending_sector != _cur_data["sector"]:
+            _updated["sector"] = _pending_sector
+        if isinstance(_pending_memo, str) and _pending_memo != _cur_data.get("memo", ""):
+            _updated["memo"] = _pending_memo
+        if _updated != _cur_data:
+            sector_map = {**sector_map, _cur_ticker: _updated}
 
-    df_top200["섹터"] = df_top200["ticker"].map(sector_map).fillna("")
+    df_top200["섹터"] = df_top200["ticker"].map(
+        lambda t: sector_map.get(t, {}).get("sector", "")
+    )
 
-    # ── 왼쪽: 종목 테이블 / 오른쪽: 섹터 편집 패널 ──
+    # ── 왼쪽: 종목 테이블 / 오른쪽: 섹터·메모 편집 패널 ──
     col_tbl, col_edit = st.columns([3, 2])
 
     with col_tbl:
-        st.caption("RS 순으로 정렬된 Top 200 종목 — 오른쪽에서 종목을 선택해 섹터를 입력하세요.")
-        display_df = df_top200[[
-            "ticker", "name", "market", "rs_rating", "섹터"
-        ]].copy()
+        st.caption("RS 순으로 정렬된 Top 200 종목 — 오른쪽에서 종목을 선택해 섹터·메모를 입력하세요.")
+        display_df = df_top200[["ticker", "name", "market", "rs_rating", "섹터"]].copy()
         display_df.columns = ["코드", "종목명", "시장", "RS", "섹터"]
         st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True,
-            height=480,
-            column_config={
-                "RS": st.column_config.NumberColumn("RS", format="%d"),
-            },
+            display_df, use_container_width=True, hide_index=True, height=480,
+            column_config={"RS": st.column_config.NumberColumn("RS", format="%d")},
         )
 
     with col_edit:
-        st.caption("종목을 선택한 뒤 섹터를 입력하고 **Enter**를 누르세요.")
+        st.caption("종목 선택 후 섹터·메모를 입력하세요. 변경 시 자동 저장됩니다.")
 
         ticker_labels = [
             f"{row['ticker']}  {row['name']}"
             for _, row in df_top200.iterrows()
         ]
-
         sel_idx = st.selectbox(
             "종목 선택",
             options=range(len(ticker_list)),
@@ -1392,10 +1399,12 @@ def render_market():
             key="sector_ticker_sel",
             label_visibility="collapsed",
         )
-        sel_ticker = ticker_list[sel_idx]
-        cur_sector = sector_get().get(sel_ticker, "")   # DB 원본값 기준
+        sel_ticker  = ticker_list[sel_idx]
+        _db_data    = sector_get().get(sel_ticker, {"sector": "", "memo": ""})
+        cur_sector  = _db_data["sector"]
+        cur_memo    = _db_data.get("memo", "")
 
-        # 섹터 텍스트 입력 (한글 IME 정상 동작)
+        # 섹터 입력
         new_sector = st.text_input(
             "섹터",
             value=cur_sector,
@@ -1403,28 +1412,44 @@ def render_market():
             placeholder="예: 반도체, 바이오, 2차전지 ...",
         )
 
-        # 값이 바뀌었으면 즉시 저장 (st.rerun() 없음 — 낙관적 업데이트로 대체)
-        if new_sector != cur_sector:
-            sector_upsert(sel_ticker, new_sector)
-            # sector_get.clear()는 sector_upsert() 내부에서 호출됨
-            st.toast(f"💾 저장됨")
+        # 메모 입력
+        new_memo = st.text_area(
+            "메모",
+            value=cur_memo,
+            key=f"memo_input_{sel_ticker}",
+            placeholder="관심 이유, 매수 근거, 리스크 등 자유롭게 ...",
+            height=120,
+        )
 
-        # ── 현재 입력된 섹터 전체 현황 ──
+        # 섹터 또는 메모 중 하나라도 바뀌면 저장
+        if new_sector != cur_sector or new_memo != cur_memo:
+            sector_upsert(sel_ticker, new_sector, new_memo)
+            st.toast("💾 저장됨")
+
+        # ── 저장된 섹터/메모 전체 현황 ──
         if sector_map:
             st.markdown("---")
-            st.markdown("**저장된 섹터 목록**")
-            saved_df = (
-                df_top200[df_top200["섹터"] != ""][["ticker", "name", "섹터"]]
-                .copy()
-            )
-            if not saved_df.empty:
-                saved_df.columns = ["코드", "종목명", "섹터"]
+            st.markdown("**저장된 목록**")
+            saved_rows = []
+            for t, d in sector_map.items():
+                if d.get("sector") or d.get("memo"):
+                    name = ticker_name_map.get(t, t).split("—")[-1].strip() \
+                           if "—" in ticker_name_map.get(t, t) else t
+                    saved_rows.append({
+                        "코드": t, "종목명": name,
+                        "섹터": d.get("sector", ""),
+                        "메모": d.get("memo", ""),
+                    })
+            if saved_rows:
                 st.dataframe(
-                    saved_df, use_container_width=True,
-                    hide_index=True, height=280,
+                    pd.DataFrame(saved_rows),
+                    use_container_width=True, hide_index=True, height=280,
+                    column_config={
+                        "메모": st.column_config.TextColumn("메모", width="large"),
+                    },
                 )
             else:
-                st.info("아직 입력된 섹터가 없습니다.")
+                st.info("아직 입력된 내용이 없습니다.")
 
     st.markdown("---")
 
@@ -1434,9 +1459,11 @@ def render_market():
     df_today = df[df["date"] == selected_date].copy()
 
     # 사용자 입력 섹터를 우선 적용 (FDR 섹터보다 우선)
-    _sm = sector_get()
+    _sm = sector_get()   # {ticker: {"sector": str, "memo": str}}
     if _sm:
-        df_today["_user_sector"] = df_today["ticker"].map(_sm)
+        df_today["_user_sector"] = df_today["ticker"].map(
+            lambda t: _sm[t]["sector"] if t in _sm else None
+        )
         if "sector" in df_today.columns:
             df_today["sector"] = df_today["_user_sector"].combine_first(df_today["sector"])
         else:

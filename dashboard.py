@@ -300,6 +300,58 @@ def load_rs_daily_surge(target_date: str, top_n: int = 10):
 
 
 @st.cache_data(ttl=600)
+def load_rs_new_high_price_not(target_date: str, price_gap_max: float = -3.0, top_n: int = 10):
+    """RS Rating은 수집 기간 내 신고가이나, 주가는 신고가가 아닌 종목 반환.
+
+    Args:
+        target_date   : 기준일
+        price_gap_max : 52주 고가 대비 허용 하락폭(%) — 기본 -3% (신고가 근처 제외)
+        top_n         : 반환 종목 수
+    """
+    conn = sqlite3.connect(DB_PATH)
+    # ① target_date 기준 RS 신고가 종목 (수집 기간 전체 max와 동일한 종목)
+    df = pd.read_sql(f"""
+        SELECT r.ticker,
+               COALESCE(r.name, r.ticker) AS name,
+               r.market,
+               r.rs_rating,
+               r.latest_close,
+               r.ret_1d,
+               r.ret_1m,
+               r.ret_3m,
+               r.ret_6m,
+               r.ret_12m,
+               r.sma50,
+               r.sma150,
+               r.sma200
+        FROM rs_ratings r
+        INNER JOIN (
+            SELECT ticker, MAX(rs_rating) AS max_rs
+            FROM rs_ratings
+            GROUP BY ticker
+        ) mx ON r.ticker = mx.ticker AND r.rs_rating >= mx.max_rs
+        WHERE r.date = '{target_date}'
+          AND r.rs_rating >= mx.max_rs - 2   -- 최고값 -2pt 이내 (단기 DB 보정)
+        ORDER BY r.rs_rating DESC
+    """, conn)
+    conn.close()
+
+    if df.empty:
+        return df
+
+    # ② 52주 고가 추정 (ret_xM 역산 방식 — dashboard 동일 로직)
+    for p, r in [("_p1m","ret_1m"),("_p3m","ret_3m"),("_p6m","ret_6m"),("_p12m","ret_12m")]:
+        df[p] = df["latest_close"] / (1 + df[r].fillna(0) / 100)
+    df["_high52w"] = df[["latest_close","_p1m","_p3m","_p6m","_p12m"]].max(axis=1)
+    df["high52w_gap"] = ((df["latest_close"] / df["_high52w"]) - 1) * 100
+
+    # ③ 주가 신고가 아닌 것만 (price_gap_max 미만 = 신고가에서 충분히 떨어진 종목)
+    df = df[df["high52w_gap"] < price_gap_max].head(top_n)
+
+    return df.drop(columns=["_p1m","_p3m","_p6m","_p12m","_high52w"])
+
+
+@st.cache_data(ttl=600)
 def load_rs_surge(min_delta=10):
     """1주일(~5 거래일) 전 대비 RS Rating 10pt 이상 급등 종목 반환."""
     conn = sqlite3.connect(DB_PATH)
@@ -1071,6 +1123,7 @@ def render_screener():
     _surge    = pd.DataFrame()   # 급등
     _volume   = pd.DataFrame()   # 거래량 폭등
     _rs_surge, _rs_date, _rs_prev_date = load_rs_daily_surge(selected_date)
+    _rs_nh    = load_rs_new_high_price_not(selected_date)   # RS 신고가 / 주가 미신고가
 
     if "ret_1d" in _base.columns:
         _surge = _base[_base["ret_1d"].fillna(0) >= 10].copy()
@@ -1093,8 +1146,9 @@ def render_screener():
     has_surge    = not _surge.empty
     has_volume   = not _volume.empty
     has_rs_surge = not _rs_surge.empty
+    has_rs_nh    = not _rs_nh.empty
 
-    if has_surge or has_volume or has_rs_surge:
+    if has_surge or has_volume or has_rs_surge or has_rs_nh:
         with st.expander(f"⚡ 특징주 ({selected_date})", expanded=True):
             def _cards(df_cards, label_col="ret_1d", label_fmt="{:+.1f}%", badge_color=None):
                 """종목 카드 렌더링."""
@@ -1202,6 +1256,55 @@ def render_screener():
         background:{_badge_bg};color:#fff;
         font-size:11px;font-weight:700;padding:2px 7px;border-radius:12px;
     ">RS {_delta_str}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+            # ── RS 신고가 / 주가 미신고가 ──
+            if has_rs_nh:
+                st.markdown("**🏆 RS 신고가 · 주가 미신고가** — 수집 기간 내 RS 최고점, 주가는 52주 고가 -3% 이상 하락 중")
+                st.caption("※ 미네르비니 관점: 주가 돌파에 앞서 RS선이 먼저 신고가를 내는 선행 신호입니다.")
+                _nh_cols = st.columns(min(len(_rs_nh), 5))
+                for _i, (_, _row) in enumerate(_rs_nh.iterrows()):
+                    _tk     = _row.get("ticker", "")
+                    _nm     = ticker_name_map.get(_tk, _row.get("name", _tk))
+                    _price  = _row.get("latest_close")
+                    _ret1d  = _row.get("ret_1d")
+                    _rs     = _row.get("rs_rating")
+                    _gap    = _row.get("high52w_gap")
+                    _mkt    = _row.get("market", "")
+
+                    _price_v   = _price if (_price is not None and pd.notna(_price)) else None
+                    _ret1d_v   = _ret1d if (_ret1d is not None and pd.notna(_ret1d)) else 0
+                    _ret_col   = "#16a34a" if _ret1d_v >= 0 else "#dc2626"
+                    _rs_str    = f"RS {int(_rs)}" if (_rs is not None and pd.notna(_rs)) else ""
+                    _ret_str   = f"{_ret1d_v:+.1f}%" if _ret1d is not None and pd.notna(_ret1d) else ""
+                    _gap_str   = f"{_gap:.1f}%" if (_gap is not None and pd.notna(_gap)) else ""
+                    _price_str = f"₩{int(_price_v):,}" if _price_v else "-"
+                    _mkt_badge = "🟦" if _mkt == "KOSPI" else "🟩"
+                    _badge_bg  = "#f59e0b"   # 골드 계열 — 잠재 돌파 후보
+
+                    with _nh_cols[_i % 5]:
+                        st.markdown(f"""
+<div style="
+    background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
+    padding:12px 14px;margin-bottom:8px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.06);
+    border-left:4px solid {_badge_bg};
+">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <span style="font-size:11px;color:#64748b;">{_mkt_badge} {_tk}</span>
+    <span style="font-size:11px;color:#64748b;">{_rs_str}</span>
+  </div>
+  <div style="font-weight:700;font-size:13px;color:#1e293b;margin-bottom:6px;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+       title="{_nm}">{_nm}</div>
+  <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:4px;">{_price_str}</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-size:13px;font-weight:700;color:{_ret_col};">{_ret_str}</span>
+    <span style="
+        background:{_badge_bg};color:#fff;
+        font-size:11px;font-weight:700;padding:2px 7px;border-radius:12px;
+    ">고가 {_gap_str}</span>
   </div>
 </div>""", unsafe_allow_html=True)
     else:

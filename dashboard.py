@@ -265,6 +265,41 @@ def load_rs_history(ticker):
 
 
 @st.cache_data(ttl=600)
+def load_rs_daily_surge(target_date: str, top_n: int = 10):
+    """target_date 기준 전일 대비 RS Rating 가장 많이 오른 top_n 종목 반환."""
+    conn = sqlite3.connect(DB_PATH)
+    all_dates = pd.read_sql(
+        "SELECT DISTINCT date FROM rs_ratings ORDER BY date DESC", conn
+    )["date"].tolist()
+    if target_date not in all_dates:
+        conn.close()
+        return pd.DataFrame(), target_date, ""
+    idx = all_dates.index(target_date)
+    if idx + 1 >= len(all_dates):
+        conn.close()
+        return pd.DataFrame(), target_date, ""
+    prev_date = all_dates[idx + 1]
+    df = pd.read_sql(f"""
+        SELECT r1.ticker,
+               COALESCE(r1.name, r1.ticker) AS name,
+               r1.market,
+               r1.rs_rating    AS rs_now,
+               r2.rs_rating    AS rs_prev,
+               (r1.rs_rating - r2.rs_rating) AS rs_delta,
+               r1.latest_close,
+               r1.ret_1d
+        FROM rs_ratings r1
+        JOIN rs_ratings r2 ON r1.ticker = r2.ticker
+        WHERE r1.date = '{target_date}' AND r2.date = '{prev_date}'
+          AND (r1.rs_rating - r2.rs_rating) > 0
+        ORDER BY rs_delta DESC
+        LIMIT {top_n}
+    """, conn)
+    conn.close()
+    return df, target_date, prev_date
+
+
+@st.cache_data(ttl=600)
 def load_rs_surge(min_delta=10):
     """1주일(~5 거래일) 전 대비 RS Rating 10pt 이상 급등 종목 반환."""
     conn = sqlite3.connect(DB_PATH)
@@ -1033,8 +1068,9 @@ def render_screener():
     st.markdown("---")
     _base = df[df["date"] == selected_date].copy() if "date" in df.columns else df.copy()
 
-    _surge  = pd.DataFrame()   # 급등
-    _volume = pd.DataFrame()   # 거래량 폭등
+    _surge    = pd.DataFrame()   # 급등
+    _volume   = pd.DataFrame()   # 거래량 폭등
+    _rs_surge, _rs_date, _rs_prev_date = load_rs_daily_surge(selected_date)
 
     if "ret_1d" in _base.columns:
         _surge = _base[_base["ret_1d"].fillna(0) >= 10].copy()
@@ -1054,10 +1090,11 @@ def render_screener():
     if not _surge.empty and not _volume.empty:
         _volume = _volume[~_volume["ticker"].isin(_surge["ticker"])]
 
-    has_surge  = not _surge.empty
-    has_volume = not _volume.empty
+    has_surge    = not _surge.empty
+    has_volume   = not _volume.empty
+    has_rs_surge = not _rs_surge.empty
 
-    if has_surge or has_volume:
+    if has_surge or has_volume or has_rs_surge:
         with st.expander(f"⚡ 특징주 ({selected_date})", expanded=True):
             def _cards(df_cards, label_col="ret_1d", label_fmt="{:+.1f}%", badge_color=None):
                 """종목 카드 렌더링."""
@@ -1117,6 +1154,56 @@ def render_screener():
                 _cards(_volume, label_col="avg_vol_10d",
                        label_fmt="{:,.0f}주(평균)",
                        badge_color="#7c3aed")
+
+            if has_rs_surge:
+                st.markdown(
+                    f"**📈 RS Rating 급등** — 전일({_rs_prev_date[5:] if _rs_prev_date else '?'}) 대비 당일 상승폭 Top 10"
+                )
+                # RS 급등 카드: rs_delta를 badge에 표시
+                _rs_cols = st.columns(min(len(_rs_surge), 5))
+                for _i, (_, _row) in enumerate(_rs_surge.iterrows()):
+                    _tk    = _row.get("ticker", "")
+                    _nm    = ticker_name_map.get(_tk, _row.get("name", _tk))
+                    _price = _row.get("latest_close")
+                    _ret1d = _row.get("ret_1d")
+                    _rs    = _row.get("rs_now")
+                    _delta = _row.get("rs_delta")
+                    _mkt   = _row.get("market", "")
+
+                    _price_v  = _price if (pd.notna(_price) if _price is not None else False) else None
+                    _ret1d_v  = _ret1d if (pd.notna(_ret1d) if _ret1d is not None else False) else 0
+                    _ret_col  = "#16a34a" if _ret1d_v >= 0 else "#dc2626"
+                    _rs_str   = f"RS {int(_rs)}" if (_rs is not None and pd.notna(_rs)) else ""
+                    _ret_str  = f"{_ret1d_v:+.1f}%" if _ret1d is not None and pd.notna(_ret1d) else ""
+                    _delta_str= f"+{_delta:.0f}pt" if (_delta is not None and pd.notna(_delta)) else ""
+                    _price_str= f"₩{int(_price_v):,}" if _price_v else "-"
+                    _mkt_badge= "🟦" if _mkt == "KOSPI" else "🟩"
+                    _badge_bg = "#0ea5e9"   # RS 급등 = 하늘색 계열
+
+                    with _rs_cols[_i % 5]:
+                        st.markdown(f"""
+<div style="
+    background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
+    padding:12px 14px;margin-bottom:8px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.06);
+    border-left:4px solid {_badge_bg};
+">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <span style="font-size:11px;color:#64748b;">{_mkt_badge} {_tk}</span>
+    <span style="font-size:11px;color:#64748b;">{_rs_str}</span>
+  </div>
+  <div style="font-weight:700;font-size:13px;color:#1e293b;margin-bottom:6px;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+       title="{_nm}">{_nm}</div>
+  <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:4px;">{_price_str}</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-size:13px;font-weight:700;color:{_ret_col};">{_ret_str}</span>
+    <span style="
+        background:{_badge_bg};color:#fff;
+        font-size:11px;font-weight:700;padding:2px 7px;border-radius:12px;
+    ">RS {_delta_str}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
     else:
         with st.expander(f"⚡ 특징주 ({selected_date})", expanded=False):
             st.caption(f"기준일({selected_date}) 급등/거래량 폭등 종목이 없습니다.")
